@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>СС · Шахматка</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; background: #f0f2f5; color: #222; }
+
+/* ── TOPBAR ── */
+.topbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; background: #fff;
+  border-bottom: 1px solid #ddd;
+  position: sticky; top: 0; z-index: 200;
+  flex-wrap: wrap;
+}
+.topbar h1 { font-size: 15px; font-weight: 700; color: #1a3a6b; margin-right: 4px; }
+.btn {
+  padding: 5px 12px; border: 1px solid #ccc; border-radius: 4px;
+  background: #fff; cursor: pointer; font-size: 12px;
+}
+.btn:hover { background: #f5f5f5; }
+.btn-pri { background: #1a3a6b; color: #fff; border-color: #1a3a6b; }
+.btn-pri:hover { background: #0f2755; }
+.btn-ok  { background: #4caf50; color: #fff; border-color: #4caf50; }
+#zoom-val { font-size: 12px; min-width: 36px; text-align: center; color: #555; }
+.sync { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #888; margin-left: auto; }
+#sdot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; flex-shrink: 0; }
+#sdot.ok   { background: #4caf50; }
+#sdot.err  { background: #f44336; }
+#sdot.spin { background: #ff9800; }
+
+/* ── FILTERBAR ── */
+.filterbar {
+  padding: 8px 12px; background: #fff;
+  border-bottom: 1px solid #ddd;
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+}
+.filterbar label { font-size: 11px; color: #888; margin-right: 2px; white-space: nowrap; }
+#fc { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.chip {
+  padding: 3px 10px; border-radius: 12px;
+  border: 1px solid #ccc; background: #fff;
+  cursor: pointer; font-size: 12px; user-select: none;
+}
+.chip.active { background: #1a3a6b; color: #fff; border-color: #1a3a6b; }
+.chip:hover:not(.active) { background: #f0f4ff; border-color: #99b3e6; }
+select.fsel {
+  padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;
+  font-size: 12px; background: #fff; max-width: 160px;
+}
+
+/* ── STATSBAR ── */
+.statsbar {
+  padding: 5px 12px; background: #fff;
+  border-bottom: 1px solid #ddd;
+  font-size: 12px; color: #555;
+  display: flex; gap: 16px; align-items: center;
+}
+.statsbar b { color: #1a3a6b; }
+#sb-done { color: #4caf50 !important; }
+
+/* ── BOARD ── */
+.board-wrap { overflow: auto; padding: 12px; max-height: calc(100vh - 130px); }
+#zoom-wrap { display: inline-block; }
+#board { border-collapse: collapse; white-space: nowrap; table-layout: fixed; }
+
+/* Header cells */
+#board thead th {
+  border: 1px solid #c8d4e8;
+  font-size: 11px; font-weight: 600;
+  padding: 4px 6px; text-align: center;
+  position: sticky;
+}
+/* Sticky row offsets set by JS after render */
+.h-corpus   { background: #1a3a6b; color: #fff; z-index: 12; }
+.h-zahvatka { background: #2d6abf; color: #fff; z-index: 11; }
+.h-sistema  { background: #4a8fd6; color: #fff; z-index: 10; }
+.h-lokacia  { background: #7cb8f0; color: #222; z-index: 9; }
+.h-work {
+  background: #d6e9fa; color: #222; z-index: 8;
+  white-space: nowrap;
+  writing-mode: vertical-lr;
+  transform: rotate(180deg);
+  height: 140px;
+  vertical-align: bottom;
+  padding: 6px 4px;
+  text-align: left;
+}
+#board thead th:not(.rh):not(.h-work) { white-space: normal; word-break: break-word; vertical-align: middle; }
+
+/* Row header (sticky left) */
+td.rh, th.rh {
+  background: #f0f4ff; font-weight: 600;
+  padding: 4px 8px; text-align: center;
+  position: sticky; left: 0; min-width: 54px;
+  border: 1px solid #c8d4e8;
+}
+th.rh { background: #1a3a6b; color: #fff; z-index: 20 !important; }
+
+/* Data cells */
+td.cell {
+  width: 100px; height: 32px;
+  text-align: center; vertical-align: middle;
+  border: 1px solid #dde4ef;
+  cursor: pointer; font-size: 18px; line-height: 1;
+  transition: background 0.1s;
+  user-select: none;
+}
+td.cell.c-done  { background: #4caf50; color: #fff; }
+td.cell.c-done:hover  { background: #43a047; }
+td.cell.c-empty { background: #fff; color: #bbb; }
+td.cell.c-empty:hover { background: #f0faf0; color: #4caf50; }
+td.cell.c-na    { background: #f4f4f4; cursor: default; color: transparent; }
+
+
+/* ── EMPTY ── */
+#empty { text-align: center; padding: 48px; color: #aaa; font-size: 14px; }
+#empty.hide { display: none; }
+
+/* ── LOADER ── */
+#loader {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+#loader.hide { display: none; }
+#loader-box {
+  background: #fff; padding: 24px 36px; border-radius: 10px;
+  font-size: 14px; text-align: center;
+}
+
+/* ── TOASTS ── */
+#toasts { position: fixed; bottom: 16px; right: 16px; z-index: 999; display: flex; flex-direction: column; gap: 6px; }
+.toast {
+  padding: 9px 16px; border-radius: 6px; color: #fff;
+  font-size: 13px; max-width: 340px;
+  animation: fadeUp .2s ease;
+}
+.toast.ok  { background: #4caf50; }
+.toast.err { background: #f44336; }
+.toast.inf { background: #2196f3; }
+@keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; } }
+
+/* ── PASSWORD MODAL ── */
+#pwd-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 500;
+}
+#pwd-overlay.hide { display: none; }
+#pwd-box {
+  background: #fff; padding: 24px 28px; border-radius: 10px;
+  width: 300px; box-shadow: 0 8px 32px rgba(0,0,0,.15);
+}
+#pwd-box h3 { margin-bottom: 14px; font-size: 15px; color: #1a3a6b; }
+#pwd-inp {
+  width: 100%; padding: 9px 10px;
+  border: 1px solid #ccc; border-radius: 5px;
+  margin-bottom: 10px; font-size: 14px;
+}
+.pwd-btns { display: flex; gap: 8px; justify-content: flex-end; }
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <h1>СС · Шахматка</h1>
+  <button class="btn" onclick="reload()">↺ Обновить</button>
+  <button class="btn btn-pri" id="auth-btn" onclick="openPwd(null)">🔐 Войти</button>
+  <button class="btn" onclick="changeZoom(-10)">−</button>
+  <span id="zoom-val">100%</span>
+  <button class="btn" onclick="changeZoom(+10)">+</button>
+  <div class="sync"><div id="sdot"></div><span id="stxt">загрузка…</span></div>
+</div>
+
+<!-- FILTERBAR -->
+<div class="filterbar">
+  <div id="fc"></div>
+  <div><label>Группа</label>
+    <select class="fsel" id="fgroup" onchange="render()"><option value="">Все</option></select></div>
+  <div><label>Захватка</label>
+    <select class="fsel" id="fzahvatka" onchange="render()"><option value="">Все</option></select></div>
+  <div><label>Система</label>
+    <select class="fsel" id="fsistema" onchange="render()"><option value="">Все</option></select></div>
+  <div><label>Локация</label>
+    <select class="fsel" id="flokacia" onchange="render()"><option value="">Все</option></select></div>
+  <div><label>Работа</label>
+    <select class="fsel" id="fwork" onchange="render()" style="max-width:200px"><option value="">Все</option></select></div>
+  <button class="btn" onclick="clearFilters()" style="margin-left:4px">✕ Сбросить</button>
+</div>
+
+<!-- STATSBAR -->
+<div class="statsbar">
+  <span>Позиций: <b id="sb-total">—</b></span>
+  <span>Готово: <b id="sb-done">—</b></span>
+  <span>Готовность: <b id="sb-pct">—</b>%</span>
+</div>
+
+<!-- BOARD -->
+<div class="board-wrap" id="board-wrap">
+  <div id="empty" class="hide">Нет данных</div>
+  <div id="zoom-wrap">
+    <table id="board"></table>
+  </div>
+</div>
+
+<!-- LOADER -->
+<div id="loader"><div id="loader-box">Загрузка данных…</div></div>
+
+<!-- TOASTS -->
+<div id="toasts"></div>
+
+<!-- PASSWORD MODAL -->
+<div id="pwd-overlay" class="hide">
+  <div id="pwd-box">
+    <h3>Администратор</h3>
+    <input id="pwd-inp" type="password" placeholder="Введите пароль"
+      onkeydown="if(event.key==='Enter')submitPwd()">
+    <div class="pwd-btns">
+      <button class="btn" onclick="closePwd()">Отмена</button>
+      <button class="btn btn-pri" onclick="submitPwd()">Войти</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── CONFIG ─────────────────────────────────────────────────────────────────
+var BASE = 'https://script.google.com/macros/s/AKfycbxWe1t4HXvXHaMkeXYcRFAzx3aJ-QErc98efb867aGhcUw0fogI5NO3X_fBeO_tvY3G/exec';
+
+// ─── STATE ───────────────────────────────────────────────────────────────────
+var WORKS  = [];   // [{workId, razdel, sistema, work, lokacia, zahvatka, group, nameGrid}]
+var FLOORS = [];   // [{floorId, corpus, floor}]
+var FACTS  = [];   // [{workId, floorId, status, date, pct}] — только непустые
+
+var WORKS_MAP    = {};  // workId → work
+var FLOOR_MAP    = {};  // floorId → {corpus, floor}
+var FLOOR_BY_KEY = {};  // `${corpus}_${floorNum}` → floorId
+var FACT_MAP     = {};  // `${workId}_${floorId}` → {status, date, pct}
+
+var UNIQUE_CORPUS = [];
+var UNIQUE_FLOORS = []; // уникальные номера этажей, по убыванию
+var ALL_COLS      = []; // [{corpus, workId, zahvatka, sistema, lokacia, group, nameGrid}]
+
+var IS_ADMIN = false;
+var ZOOM = 100;
+var _pwdCb = null;
+
+
+// ─── INIT ────────────────────────────────────────────────────────────────────
+window.onload = function () {
+  ZOOM = parseInt(localStorage.getItem('cc_zoom') || '100', 10);
+  applyZoom();
+  if (sessionStorage.getItem('cc_admin') === '1') {
+    IS_ADMIN = true;
+    setAuthBtn(true);
+  }
+  loadData();
+};
+
+// ─── ZOOM ─────────────────────────────────────────────────────────────────────
+function changeZoom(d) {
+  ZOOM = Math.max(50, Math.min(150, ZOOM + d));
+  localStorage.setItem('cc_zoom', ZOOM);
+  applyZoom();
+}
+function applyZoom() {
+  document.getElementById('zoom-val').textContent = ZOOM + '%';
+  document.getElementById('zoom-wrap').style.zoom = ZOOM / 100;
+}
+
+// ─── DATA ─────────────────────────────────────────────────────────────────────
+function reload() {
+  fetch(BASE + '?action=clearCache').catch(function () {});
+  loadData();
+}
+
+function loadData() {
+  showLoader('Загрузка данных…');
+  setSt('spin', 'загрузка…');
+  fetch(BASE + '?action=getData')
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.error) throw new Error(d.error);
+      WORKS  = d.works  || [];
+      FLOORS = d.floors || [];
+      FACTS  = d.facts  || [];
+      buildMaps();
+      buildFilters();
+      render();
+      hideLoader();
+      setSt('ok', 'обновлено');
+    })
+    .catch(function (err) {
+      hideLoader();
+      setSt('err', 'ошибка');
+      toast('Ошибка загрузки: ' + err.message, 'err', 6000);
+    });
+}
+
+function buildMaps() {
+  WORKS_MAP = {}; FLOOR_MAP = {}; FLOOR_BY_KEY = {}; FACT_MAP = {};
+
+  WORKS.forEach(function (w) { WORKS_MAP[w.workId] = w; });
+
+  FLOORS.forEach(function (f) {
+    FLOOR_MAP[f.floorId] = f;
+    FLOOR_BY_KEY[f.corpus + '_' + f.floor] = f.floorId;
+  });
+
+  FACTS.forEach(function (f) {
+    FACT_MAP[f.workId + '_' + f.floorId] = f;
+  });
+
+  // Уникальные корпуса (сортировка: К1, К2, ...)
+  var cSet = {};
+  FLOORS.forEach(function (f) { cSet[f.corpus] = true; });
+  UNIQUE_CORPUS = Object.keys(cSet).sort(naturalSort);
+
+  // Уникальные номера этажей (по убыванию)
+  var fSet = {};
+  FLOORS.forEach(function (f) { fSet[f.floor] = true; });
+  UNIQUE_FLOORS = Object.keys(fSet).map(Number).sort(function (a, b) { return b - a; });
+
+  // ALL_COLS: для каждого корпуса × для каждой работы (порядок из справочника)
+  // Сортировка внутри корпуса: захватка → система → локация → порядок из справочника
+  ALL_COLS = [];
+  UNIQUE_CORPUS.forEach(function (corpus) {
+    var worksForCorpus = WORKS.slice(); // сохраняем порядок справочника
+    worksForCorpus.sort(function (a, b) {
+      var za = a.zahvatka || '', zb = b.zahvatka || '';
+      if (za !== zb) return za < zb ? -1 : 1;
+      var sa = a.sistema || '', sb = b.sistema || '';
+      if (sa !== sb) return sa < sb ? -1 : 1;
+      var la = a.lokacia || '', lb = b.lokacia || '';
+      if (la !== lb) return la < lb ? -1 : 1;
+      return 0; // сохраняем оригинальный порядок внутри группы
+    });
+    worksForCorpus.forEach(function (w) {
+      ALL_COLS.push({
+        corpus  : corpus,
+        workId  : w.workId,
+        zahvatka: w.zahvatka,
+        sistema : w.sistema,
+        lokacia : w.lokacia,
+        razdel  : w.razdel,
+        group   : w.group,
+        nameGrid: w.nameGrid,
+      });
+    });
+  });
+}
+
+// ─── FILTERS ──────────────────────────────────────────────────────────────────
+function buildFilters() {
+  // Корпус chips
+  var html = '<span class="chip active" data-v="" onclick="setCorpus(this,\'\')">Все</span>';
+  UNIQUE_CORPUS.forEach(function (c) {
+    html += '<span class="chip" data-v="' + e(c) + '" onclick="setCorpus(this,\'' + e(c) + '\')">' + e(c) + '</span>';
+  });
+  document.getElementById('fc').innerHTML = html;
+
+  fillSelect('fgroup',    uniqueVals(WORKS, 'group'));
+  fillSelect('fzahvatka', uniqueVals(WORKS, 'zahvatka'));
+  fillSelect('fsistema',  uniqueVals(WORKS, 'sistema'));
+  fillSelect('flokacia',  uniqueVals(WORKS, 'lokacia'));
+  fillSelect('fwork',     uniqueVals(WORKS, 'nameGrid'));
+}
+
+function uniqueVals(arr, key) {
+  var seen = {}, res = [];
+  arr.forEach(function (x) {
+    var v = x[key];
+    if (v && !seen[v]) { seen[v] = true; res.push(v); }
+  });
+  return res.sort();
+}
+
+function fillSelect(id, vals) {
+  var sel = document.getElementById(id);
+  var cur = sel.value;
+  sel.innerHTML = '<option value="">Все</option>';
+  vals.forEach(function (v) {
+    sel.innerHTML += '<option value="' + e(v) + '"' + (v === cur ? ' selected' : '') + '>' + e(v) + '</option>';
+  });
+}
+
+function setCorpus(el, v) {
+  document.querySelectorAll('#fc .chip').forEach(function (c) { c.classList.remove('active'); });
+  el.classList.add('active');
+  render();
+}
+
+function clearFilters() {
+  var chips = document.querySelectorAll('#fc .chip');
+  chips.forEach(function (c, i) { c.classList.toggle('active', i === 0); });
+  document.getElementById('fgroup').value    = '';
+  document.getElementById('fzahvatka').value = '';
+  document.getElementById('fsistema').value  = '';
+  document.getElementById('flokacia').value  = '';
+  document.getElementById('fwork').value     = '';
+  render();
+}
+
+function getActiveCorp() {
+  var a = document.querySelector('#fc .chip.active');
+  return a ? a.dataset.v : '';
+}
+
+function getFilteredCols() {
+  var fc = getActiveCorp();
+  var fg = document.getElementById('fgroup').value;
+  var fz = document.getElementById('fzahvatka').value;
+  var fs = document.getElementById('fsistema').value;
+  var fl = document.getElementById('flokacia').value;
+  var fw = document.getElementById('fwork').value;
+  return ALL_COLS.filter(function (col) {
+    if (fc && col.corpus   !== fc) return false;
+    if (fg && col.group    !== fg) return false;
+    if (fz && col.zahvatka !== fz) return false;
+    if (fs && col.sistema  !== fs) return false;
+    if (fl && col.lokacia  !== fl) return false;
+    if (fw && col.nameGrid !== fw) return false;
+    return true;
+  });
+}
+
+// ─── RENDER ───────────────────────────────────────────────────────────────────
+function render() {
+  var cols = getFilteredCols();
+
+  // Только этажи корпусов, реально попавших в отфильтрованные колонки
+  var corpusSet = {};
+  cols.forEach(function (col) { corpusSet[col.corpus] = true; });
+  var fSet = {};
+  FLOORS.forEach(function (f) {
+    if (corpusSet[f.corpus]) fSet[f.floor] = true;
+  });
+  var floorNums = Object.keys(fSet).map(Number).sort(function (a, b) { return b - a; });
+
+  if (cols.length === 0 || floorNums.length === 0) {
+    document.getElementById('board').innerHTML = '';
+    document.getElementById('empty').classList.remove('hide');
+    updateStats(0, 0);
+    return;
+  }
+  document.getElementById('empty').classList.add('hide');
+
+  var cg = '<colgroup><col style="width:54px">';
+  cols.forEach(function () { cg += '<col style="width:100px">'; });
+  cg += '</colgroup>';
+  var html = cg + '<thead>' + buildHeaders(cols) + '</thead><tbody>' + buildBody(cols, floorNums) + '</tbody>';
+  var board = document.getElementById('board');
+  board.innerHTML = html;
+  board.onclick = function (ev) {
+    var td = ev.target;
+    while (td && td.tagName !== 'TD') td = td.parentElement;
+    if (!td || !td.classList.contains('cell') || td.classList.contains('c-na')) return;
+    cellClick(td.dataset.corpus, parseFloat(td.dataset.floor), td.dataset.work);
+  };
+  fixStickyOffsets();
+  updateStats(countStats(cols, floorNums));
+}
+
+// 5-уровневые заголовки: Корпус > Захватка > Система > Локация > Работа
+function buildHeaders(cols) {
+  var levels = [
+    { key: 'corpus',   cls: 'h-corpus'   },
+    { key: 'zahvatka', cls: 'h-zahvatka' },
+    { key: 'sistema',  cls: 'h-sistema'  },
+    { key: 'lokacia',  cls: 'h-lokacia'  },
+    { key: 'nameGrid', cls: 'h-work'     },
+  ];
+  var rows = '';
+  levels.forEach(function (lvl, li) {
+    rows += '<tr>';
+    if (li === 0) {
+      // «Этаж» занимает все 5 строк заголовка
+      rows += '<th class="rh h-corpus" rowspan="5" style="top:0;left:0;z-index:25">Этаж</th>';
+    }
+    var spans = computeSpans(cols, levels.slice(0, li + 1).map(function (l) { return l.key; }));
+    spans.forEach(function (sp) {
+      var attr = sp.span > 1 ? ' colspan="' + sp.span + '"' : '';
+      var label = sp.label || '—';
+      rows += '<th class="' + lvl.cls + '"' + attr + ' title="' + e(label) + '">' + e(label) + '</th>';
+    });
+    rows += '</tr>';
+  });
+  return rows;
+}
+
+function computeSpans(cols, keyPath) {
+  var spans = [], cur = null, count = 0;
+  cols.forEach(function (col) {
+    var key = keyPath.map(function (k) { return col[k]; }).join('\x00');
+    if (key === cur) {
+      count++;
+    } else {
+      if (cur !== null) spans.push({ label: cur.split('\x00').pop(), span: count });
+      cur = key; count = 1;
+    }
+  });
+  if (cur !== null) spans.push({ label: cur.split('\x00').pop(), span: count });
+  return spans;
+}
+
+function buildBody(cols, floorNums) {
+  var html = '';
+  floorNums.forEach(function (floorNum) {
+    html += '<tr><td class="rh">' + floorNum + '</td>';
+    cols.forEach(function (col) {
+      var floorId = FLOOR_BY_KEY[col.corpus + '_' + floorNum];
+      if (!floorId) {
+        html += '<td class="cell c-na" title="Нет в реестре"></td>';
+        return;
+      }
+      var factKey = col.workId + '_' + floorId;
+      var fact = FACT_MAP[factKey];
+      var isDone = fact && (fact.status === 'СМР окончены' || fact.pct === '100');
+      var da = ' data-corpus="' + e(col.corpus) + '" data-floor="' + floorNum + '" data-work="' + e(col.workId) + '"';
+      if (isDone) {
+        var tip = e('Готово: ' + (fact.date || '') + ' | ' + col.nameGrid + ' | ' + col.corpus + ' эт.' + floorNum);
+        html += '<td class="cell c-done"' + da + ' title="' + tip + '">☑</td>';
+      } else {
+        var tip2 = e(col.nameGrid + ' | ' + col.corpus + ' эт.' + floorNum);
+        html += '<td class="cell c-empty"' + da + ' title="' + tip2 + '">☐</td>';
+      }
+    });
+    html += '</tr>';
+  });
+  return html;
+}
+
+// Выставляем top для sticky строк заголовка после рендера
+function fixStickyOffsets() {
+  var rows = document.querySelectorAll('#board thead tr');
+  var top = 0;
+  rows.forEach(function (row) {
+    row.querySelectorAll('th').forEach(function (th) {
+      if (!th.hasAttribute('rowspan')) th.style.top = top + 'px';
+    });
+    top += row.offsetHeight;
+  });
+  // Левая верхняя ячейка rowspan=5
+  var corner = document.querySelector('#board thead th.rh');
+  if (corner) { corner.style.top = '0'; corner.style.height = top + 'px'; }
+}
+
+// ─── STATS ────────────────────────────────────────────────────────────────────
+function countStats(cols, floorNums) {
+  var total = 0, done = 0;
+  floorNums.forEach(function (floorNum) {
+    cols.forEach(function (col) {
+      var floorId = FLOOR_BY_KEY[col.corpus + '_' + floorNum];
+      if (!floorId) return;
+      total++;
+      var f = FACT_MAP[col.workId + '_' + floorId];
+      if (f && (f.status === 'СМР окончены' || f.pct === '100' || f.pct === 'true' || f.pct === 'TRUE')) done++;
+    });
+  });
+  return { total: total, done: done };
+}
+
+function updateStats(s) {
+  if (typeof s === 'number') { s = { total: s, done: arguments[1] || 0 }; }
+  var pct = s.total ? Math.round(s.done * 100 / s.total) : 0;
+  document.getElementById('sb-total').textContent = s.total;
+  document.getElementById('sb-done').textContent  = s.done;
+  document.getElementById('sb-pct').textContent   = pct;
+}
+
+// ─── CELL CLICK ───────────────────────────────────────────────────────────────
+function cellClick(corpus, floorNum, workId) {
+  var floorId = FLOOR_BY_KEY[corpus + '_' + floorNum];
+  if (!floorId) { toast('Этаж не найден в реестре', 'err'); return; }
+
+  var factKey = workId + '_' + floorId;
+  var fact    = FACT_MAP[factKey];
+  var isDone  = fact && (fact.status === 'СМР окончены' || fact.pct === '100' || fact.pct === 'true' || fact.pct === 'TRUE');
+
+  if (isDone && !confirm('Снять отметку «Готово»?')) return;
+
+  // Оптимистичное обновление — меняем UI сразу, не ждём сервер
+  var prevFact = FACT_MAP[factKey];
+  if (isDone) {
+    delete FACT_MAP[factKey];
+  } else {
+    FACT_MAP[factKey] = { workId: workId, floorId: floorId, status: 'СМР окончены', date: fmtToday(), pct: 'true' };
+  }
+  render();
+  setSt('spin', '…');
+
+  var url = BASE + '?action=saveCell&workId=' + encodeURIComponent(workId) + '&floorId=' + encodeURIComponent(floorId) + '&undo=' + isDone;
+  fetch(url)
+  .then(function (r) { return r.json(); })
+  .then(function (d) {
+    if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
+    setSt('ok', 'сохранено');
+  })
+  .catch(function (err) {
+    // Откат при ошибке
+    if (prevFact) { FACT_MAP[factKey] = prevFact; } else { delete FACT_MAP[factKey]; }
+    render();
+    setSt('err', 'ошибка');
+    toast('Ошибка: ' + err.message, 'err', 6000);
+  });
+}
+
+// ─── AUTH ──────────────────────────────────────────────────────────────────────
+function openPwd(cb) {
+  _pwdCb = cb || null;
+  document.getElementById('pwd-overlay').classList.remove('hide');
+  document.getElementById('pwd-inp').value = '';
+  setTimeout(function () { document.getElementById('pwd-inp').focus(); }, 50);
+}
+
+function closePwd() {
+  document.getElementById('pwd-overlay').classList.add('hide');
+  _pwdCb = null;
+}
+
+function submitPwd() {
+  var pwd = document.getElementById('pwd-inp').value.trim();
+  if (!pwd) return;
+  fetch(BASE + '?action=checkPassword&pwd=' + encodeURIComponent(pwd))
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.ok) {
+        IS_ADMIN = true;
+        sessionStorage.setItem('cc_admin', '1');
+        setAuthBtn(true);
+        closePwd();
+        toast('Вход выполнен', 'ok');
+        if (_pwdCb) { var cb = _pwdCb; _pwdCb = null; cb(); }
+      } else {
+        toast('Неверный пароль', 'err');
+      }
+    })
+    .catch(function () { toast('Ошибка проверки пароля', 'err'); });
+}
+
+function setAuthBtn(admin) {
+  var btn = document.getElementById('auth-btn');
+  if (admin) {
+    btn.textContent = '✓ Администратор';
+    btn.className   = 'btn btn-ok';
+    btn.onclick     = null;
+  }
+}
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+function fmtToday() {
+  var d = new Date();
+  var p = function (n) { return n < 10 ? '0' + n : String(n); };
+  return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear();
+}
+
+function naturalSort(a, b) {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function setSt(st, txt) {
+  document.getElementById('sdot').className = st;
+  document.getElementById('stxt').textContent = txt;
+}
+
+function showLoader(txt) {
+  document.getElementById('loader-box').textContent = txt || 'Загрузка…';
+  document.getElementById('loader').classList.remove('hide');
+}
+function hideLoader() { document.getElementById('loader').classList.add('hide'); }
+
+function toast(msg, tp, dur) {
+  var el = document.createElement('div');
+  el.className   = 'toast ' + (tp || 'inf');
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(function () { el.remove(); }, dur || 3000);
+}
+
+function e(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>
