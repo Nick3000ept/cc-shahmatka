@@ -576,6 +576,11 @@ function updateStats(s) {
 
 // ─── CELL CLICK ───────────────────────────────────────────────────────────────
 function cellClick(corpus, floorNum, workId) {
+  if (!IS_ADMIN) {
+    openPwd(function () { cellClick(corpus, floorNum, workId); });
+    return;
+  }
+
   var floorId = FLOOR_BY_KEY[corpus + '_' + floorNum];
   if (!floorId) { toast('Этаж не найден в реестре', 'err'); return; }
 
