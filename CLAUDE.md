@@ -15,9 +15,10 @@ HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" clasp push --force
 HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" clasp deploy --deploymentId AKfycbxWe1t4HXvXHaMkeXYcRFAzx3aJ-QErc98efb867aGhcUw0fogI5NO3X_fBeO_tvY3G
 
 # 2. Git + GitHub Pages
+# ⚠️ Прокси также блокирует git push — обходим так же
 git add index.html script.gs appsscript.json CLAUDE.md
 git commit -m "описание"
-git push
+HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" git push
 ```
 
 ## Аккаунты
