@@ -75,7 +75,8 @@ select.fsel {
   position: sticky;
 }
 /* Sticky row offsets set by JS after render */
-.h-corpus   { background: #1a3a6b; color: #fff; z-index: 12; }
+.h-corpus   { background: #1a3a6b; color: #fff; z-index: 13; }
+.h-pod      { background: #21477f; color: #fff; z-index: 12; }
 .h-zahvatka { background: #2d6abf; color: #fff; z-index: 11; }
 .h-sistema  { background: #4a8fd6; color: #fff; z-index: 10; }
 .h-lokacia  { background: #7cb8f0; color: #222; z-index: 9; }
@@ -235,17 +236,19 @@ var BASE = 'https://script.google.com/macros/s/AKfycbxWe1t4HXvXHaMkeXYcRFAzx3aJ-
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
 var WORKS  = [];   // [{workId, razdel, sistema, work, lokacia, zahvatka, group, nameGrid}]
-var FLOORS = [];   // [{floorId, corpus, floor}]
+var FLOORS = [];   // [{floorId, corpus, floor, pod}]
 var FACTS  = [];   // [{workId, floorId, status, date, pct}] — только непустые
+var FLOOR_POD = {}; // floorId → подъезд (Доп признак)
 
 var WORKS_MAP    = {};  // workId → work
-var FLOOR_MAP    = {};  // floorId → {corpus, floor}
-var FLOOR_BY_KEY = {};  // `${corpus}_${floorNum}` → floorId
+var FLOOR_MAP    = {};  // floorId → {corpus, floor, pod}
+var FLOOR_BY_KEY = {};  // floorKey(corpus, pod, floorNum) → floorId
 var FACT_MAP     = {};  // `${workId}_${floorId}` → {status, date, pct}
 
-var UNIQUE_CORPUS = [];
-var UNIQUE_FLOORS = []; // уникальные номера этажей, по убыванию
-var ALL_COLS      = []; // [{corpus, workId, zahvatka, sistema, lokacia, group, nameGrid}]
+var UNIQUE_CORPUS   = [];
+var UNIQUE_FLOORS   = []; // уникальные номера этажей, по убыванию
+var PODS_BY_CORPUS  = {}; // corpus → [подъезд,...] (отсортированы)
+var ALL_COLS        = []; // [{corpus, pod, workId, zahvatka, sistema, lokacia, group, nameGrid}]
 
 var IS_ADMIN = false;
 var ZOOM = 100;
@@ -290,6 +293,7 @@ function loadData() {
       WORKS  = d.works  || [];
       FLOORS = d.floors || [];
       FACTS  = d.facts  || [];
+      FLOOR_POD = d.floorPod || {};
       buildMaps();
       buildFilters();
       render();
@@ -309,8 +313,9 @@ function buildMaps() {
   WORKS.forEach(function (w) { WORKS_MAP[w.workId] = w; });
 
   FLOORS.forEach(function (f) {
+    f.pod = FLOOR_POD[f.floorId] || '';            // подъезд — свойство этажа
     FLOOR_MAP[f.floorId] = f;
-    FLOOR_BY_KEY[f.corpus + '_' + f.floor] = f.floorId;
+    FLOOR_BY_KEY[floorKey(f.corpus, f.pod, f.floor)] = f.floorId;
   });
 
   FACTS.forEach(function (f) {
@@ -327,8 +332,19 @@ function buildMaps() {
   FLOORS.forEach(function (f) { fSet[f.floor] = true; });
   UNIQUE_FLOORS = Object.keys(fSet).map(Number).sort(function (a, b) { return b - a; });
 
-  // ALL_COLS: для каждого корпуса × для каждой работы (порядок из справочника)
-  // Сортировка внутри корпуса: захватка → система → локация → порядок из справочника
+  // Подъезды каждого корпуса (отсортированы натурально: «1 подъезд», «2 подъезд», ...)
+  var podSet = {};
+  FLOORS.forEach(function (f) {
+    if (!podSet[f.corpus]) podSet[f.corpus] = {};
+    podSet[f.corpus][f.pod] = true;
+  });
+  PODS_BY_CORPUS = {};
+  UNIQUE_CORPUS.forEach(function (c) {
+    PODS_BY_CORPUS[c] = Object.keys(podSet[c] || {}).sort(naturalSort);
+  });
+
+  // ALL_COLS: корпус × подъезд × работа (порядок работ — из справочника)
+  // Сортировка работ внутри подъезда: захватка → система → локация → порядок справочника
   ALL_COLS = [];
   UNIQUE_CORPUS.forEach(function (corpus) {
     var worksForCorpus = WORKS.slice(); // сохраняем порядок справочника
@@ -341,19 +357,27 @@ function buildMaps() {
       if (la !== lb) return la < lb ? -1 : 1;
       return 0; // сохраняем оригинальный порядок внутри группы
     });
-    worksForCorpus.forEach(function (w) {
-      ALL_COLS.push({
-        corpus  : corpus,
-        workId  : w.workId,
-        zahvatka: w.zahvatka,
-        sistema : w.sistema,
-        lokacia : w.lokacia,
-        razdel  : w.razdel,
-        group   : w.group,
-        nameGrid: w.nameGrid,
+    (PODS_BY_CORPUS[corpus] || ['']).forEach(function (pod) {
+      worksForCorpus.forEach(function (w) {
+        ALL_COLS.push({
+          corpus  : corpus,
+          pod     : pod,
+          workId  : w.workId,
+          zahvatka: w.zahvatka,
+          sistema : w.sistema,
+          lokacia : w.lokacia,
+          razdel  : w.razdel,
+          group   : w.group,
+          nameGrid: w.nameGrid,
+        });
       });
     });
   });
+}
+
+// Ключ этажа: корпус + подъезд + номер этажа (\x00 — разделитель без коллизий)
+function floorKey(corpus, pod, floor) {
+  return corpus + '\x00' + (pod || '') + '\x00' + floor;
 }
 
 // ─── FILTERS ──────────────────────────────────────────────────────────────────
@@ -461,16 +485,17 @@ function render() {
     var td = ev.target;
     while (td && td.tagName !== 'TD') td = td.parentElement;
     if (!td || !td.classList.contains('cell') || td.classList.contains('c-na')) return;
-    cellClick(td.dataset.corpus, parseFloat(td.dataset.floor), td.dataset.work);
+    cellClick(td.dataset.corpus, td.dataset.pod, parseFloat(td.dataset.floor), td.dataset.work);
   };
   fixStickyOffsets();
   updateStats(countStats(cols, floorNums));
 }
 
-// 5-уровневые заголовки: Корпус > Захватка > Система > Локация > Работа
+// 6-уровневые заголовки: Корпус > Подъезд > Захватка > Система > Локация > Работа
 function buildHeaders(cols) {
   var levels = [
     { key: 'corpus',   cls: 'h-corpus'   },
+    { key: 'pod',      cls: 'h-pod'      },
     { key: 'zahvatka', cls: 'h-zahvatka' },
     { key: 'sistema',  cls: 'h-sistema'  },
     { key: 'lokacia',  cls: 'h-lokacia'  },
@@ -480,8 +505,8 @@ function buildHeaders(cols) {
   levels.forEach(function (lvl, li) {
     rows += '<tr>';
     if (li === 0) {
-      // «Этаж» занимает все 5 строк заголовка
-      rows += '<th class="rh h-corpus" rowspan="5" style="top:0;left:0;z-index:25">Этаж</th>';
+      // «Этаж» занимает все строки заголовка
+      rows += '<th class="rh h-corpus" rowspan="' + levels.length + '" style="top:0;left:0;z-index:25">Этаж</th>';
     }
     var spans = computeSpans(cols, levels.slice(0, li + 1).map(function (l) { return l.key; }));
     spans.forEach(function (sp) {
@@ -514,7 +539,7 @@ function buildBody(cols, floorNums) {
   floorNums.forEach(function (floorNum) {
     html += '<tr><td class="rh">' + floorNum + '</td>';
     cols.forEach(function (col) {
-      var floorId = FLOOR_BY_KEY[col.corpus + '_' + floorNum];
+      var floorId = FLOOR_BY_KEY[floorKey(col.corpus, col.pod, floorNum)];
       if (!floorId) {
         html += '<td class="cell c-na" title="Нет в реестре"></td>';
         return;
@@ -522,12 +547,13 @@ function buildBody(cols, floorNums) {
       var factKey = col.workId + '_' + floorId;
       var fact = FACT_MAP[factKey];
       var isDone = fact && (fact.status === 'СМР окончены' || fact.pct === '100');
-      var da = ' data-corpus="' + e(col.corpus) + '" data-floor="' + floorNum + '" data-work="' + e(col.workId) + '"';
+      var da = ' data-corpus="' + e(col.corpus) + '" data-pod="' + e(col.pod) + '" data-floor="' + floorNum + '" data-work="' + e(col.workId) + '"';
+      var loc = col.corpus + (col.pod ? ' · ' + col.pod : '') + ' эт.' + floorNum;
       if (isDone) {
-        var tip = e('Готово: ' + (fact.date || '') + ' | ' + col.nameGrid + ' | ' + col.corpus + ' эт.' + floorNum);
+        var tip = e('Готово: ' + (fact.date || '') + ' | ' + col.nameGrid + ' | ' + loc);
         html += '<td class="cell c-done"' + da + ' title="' + tip + '">☑</td>';
       } else {
-        var tip2 = e(col.nameGrid + ' | ' + col.corpus + ' эт.' + floorNum);
+        var tip2 = e(col.nameGrid + ' | ' + loc);
         html += '<td class="cell c-empty"' + da + ' title="' + tip2 + '">☐</td>';
       }
     });
@@ -556,7 +582,7 @@ function countStats(cols, floorNums) {
   var total = 0, done = 0;
   floorNums.forEach(function (floorNum) {
     cols.forEach(function (col) {
-      var floorId = FLOOR_BY_KEY[col.corpus + '_' + floorNum];
+      var floorId = FLOOR_BY_KEY[floorKey(col.corpus, col.pod, floorNum)];
       if (!floorId) return;
       total++;
       var f = FACT_MAP[col.workId + '_' + floorId];
@@ -575,13 +601,13 @@ function updateStats(s) {
 }
 
 // ─── CELL CLICK ───────────────────────────────────────────────────────────────
-function cellClick(corpus, floorNum, workId) {
+function cellClick(corpus, pod, floorNum, workId) {
   if (!IS_ADMIN) {
-    openPwd(function () { cellClick(corpus, floorNum, workId); });
+    openPwd(function () { cellClick(corpus, pod, floorNum, workId); });
     return;
   }
 
-  var floorId = FLOOR_BY_KEY[corpus + '_' + floorNum];
+  var floorId = FLOOR_BY_KEY[floorKey(corpus, pod, floorNum)];
   if (!floorId) { toast('Этаж не найден в реестре', 'err'); return; }
 
   var factKey = workId + '_' + floorId;

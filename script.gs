@@ -17,8 +17,8 @@ const ADMIN_PASSWORD  = 'adminCC';
 
 // Факт — столбцы (1-индекс для GAS range; 0-индекс для массива)
 // A(1/0)=ID_работы  B(2/1)=ID_этажа  C(3/2)=Система  D(4/3)=Корпус_текстом  E(5/4)=Этаж
-// F(6/5)=Статус  G(7/6)=Дата готовности  H(8/7)=Процент готовности
-// ⚠️ ПИСАТЬ ТОЛЬКО В F–H (столбцы 6–8). A–E никогда не трогать.
+// F(6/5)=Статус  G(7/6)=Дата готовности  H(8/7)=Процент готовности  I(9/8)=Доп признак (подъезд)
+// ⚠️ ПИСАТЬ ТОЛЬКО В F–H (столбцы 6–8). A–E и I никогда не трогать.
 
 var FACT_EDIT_START = 6; // столбец F
 var FACT_EDIT_COLS  = 3; // F, G, H
@@ -69,10 +69,12 @@ function doPost(e) {
 
 function getData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var factData = readFacts(ss);
   return {
-    works  : readWorks(ss),
-    floors : readFloors(ss),
-    facts  : readFacts(ss),
+    works    : readWorks(ss),
+    floors   : readFloors(ss),
+    facts    : factData.facts,
+    floorPod : factData.floorPod, // floorId → подъезд (Доп признак)
   };
 }
 
@@ -138,23 +140,29 @@ function readFloors(ss) {
 function readFacts(ss) {
   var sheet = ss.getSheetByName(FACT_SHEET);
   var facts = [];
-  if (!sheet) return facts;
+  var floorPod = {};             // floorId → подъезд (Доп признак), свойство этажа
+  if (!sheet) return { facts: facts, floorPod: floorPod };
 
   var last = sheet.getLastRow();
-  if (last < 2) return facts;
+  if (last < 2) return { facts: facts, floorPod: floorPod };
 
-  var vals = sheet.getRange(2, 1, last - 1, 8).getValues();
+  var vals = sheet.getRange(2, 1, last - 1, 9).getValues();
   vals.forEach(function (row) {
     var workId  = String(row[0]).trim();
     var floorId = String(row[1]).trim();
     if (!workId || !floorId) return;
+
+    // Доп признак (подъезд) — столбец I (index 8). Один и тот же для всех строк этажа.
+    var pod = String(row[8]).trim();
+    if (pod && !floorPod[floorId]) floorPod[floorId] = pod;
+
     var status = String(row[5]).trim();
     var date   = formatDateOut(row[6]);
     var pct    = String(row[7]).trim();
-    if (!status && !date && !pct) return; // пустые строки не передаём
+    if (!status && !date && !pct) return; // пустые строки факта не передаём
     facts.push({ workId: workId, floorId: floorId, status: status, date: date, pct: pct });
   });
-  return facts;
+  return { facts: facts, floorPod: floorPod };
 }
 
 // ─── Сохранение ─────────────────────────────────────────────────────────────
