@@ -25,6 +25,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; f
 .btn-pri { background: #1a3a6b; color: #fff; border-color: #1a3a6b; }
 .btn-pri:hover { background: #0f2755; }
 .btn-ok  { background: #4caf50; color: #fff; border-color: #4caf50; }
+.chk-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; cursor: pointer; user-select: none;
+  padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;
+}
+.chk-toggle input { cursor: pointer; }
 #zoom-val { font-size: 12px; min-width: 36px; text-align: center; color: #555; }
 .sync { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #888; margin-left: auto; }
 #sdot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; flex-shrink: 0; }
@@ -115,6 +121,7 @@ td.cell.c-done:hover  { background: #43a047; }
 td.cell.c-empty { background: #fff; color: #bbb; }
 td.cell.c-empty:hover { background: #f0faf0; color: #4caf50; }
 td.cell.c-na    { background: #f4f4f4; cursor: default; color: transparent; }
+td.cell.c-count { font-size: 14px; font-weight: 700; }
 
 
 /* ── EMPTY ── */
@@ -165,6 +172,87 @@ td.cell.c-na    { background: #f4f4f4; cursor: default; color: transparent; }
   margin-bottom: 10px; font-size: 14px;
 }
 .pwd-btns { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ── WHAT'S NEW MODAL ── */
+#wn-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 600; padding: 16px;
+}
+#wn-overlay.hide { display: none; }
+#wn-box {
+  background: #fff; border-radius: 12px;
+  width: 460px; max-width: 100%; max-height: 85vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0,0,0,.22);
+  overflow: hidden;
+}
+#wn-head {
+  background: #1a3a6b; color: #fff;
+  padding: 16px 22px; display: flex; align-items: center; gap: 8px;
+}
+#wn-head h3 { font-size: 17px; font-weight: 700; }
+#wn-date { margin-left: auto; font-size: 12px; opacity: .8; font-weight: 400; }
+#wn-body { padding: 18px 22px; overflow-y: auto; font-size: 13.5px; line-height: 1.5; color: #333; }
+#wn-body .wn-item { display: flex; gap: 10px; margin-bottom: 14px; }
+#wn-body .wn-item:last-child { margin-bottom: 0; }
+#wn-body .wn-ico { font-size: 20px; line-height: 1.2; flex-shrink: 0; }
+#wn-body .wn-txt b { color: #1a3a6b; }
+#wn-body .wn-txt small { color: #888; display: block; margin-top: 2px; }
+#wn-foot {
+  padding: 12px 22px; border-top: 1px solid #eee;
+  display: flex; align-items: center; gap: 10px;
+}
+#wn-foot label { font-size: 12px; color: #777; display: flex; align-items: center; gap: 5px; cursor: pointer; }
+#wn-foot .btn-pri { margin-left: auto; }
+
+/* ── WORK CARD MODAL (чек-листы) ── */
+#card-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 550; padding: 16px;
+}
+#card-overlay.hide { display: none; }
+#card-box {
+  background: #fff; border-radius: 12px;
+  width: 480px; max-width: 100%; max-height: 85vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0,0,0,.22); overflow: hidden;
+}
+#card-head {
+  background: #1a3a6b; color: #fff;
+  padding: 14px 20px; display: flex; align-items: flex-start; gap: 8px;
+}
+#card-head h3 { font-size: 16px; font-weight: 700; line-height: 1.3; }
+#card-x {
+  margin-left: auto; background: none; border: none; color: #fff;
+  font-size: 20px; cursor: pointer; line-height: 1; padding: 0 2px;
+}
+#card-meta { padding: 12px 20px; font-size: 12.5px; color: #555; border-bottom: 1px solid #eee; }
+#card-meta div { margin-bottom: 3px; }
+#card-checklists { padding: 12px 20px; overflow-y: auto; }
+.cl-head { font-size: 12px; color: #888; margin-bottom: 8px; text-transform: uppercase; letter-spacing: .03em; }
+.cl-empty { color: #aaa; font-size: 13px; padding: 8px 0; }
+.cl-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid #f0f0f0;
+}
+.cl-item:last-child { border-bottom: none; }
+.cl-status {
+  font-size: 11px; padding: 2px 8px; border-radius: 10px;
+  background: #eef2f8; color: #34507f; white-space: nowrap; flex-shrink: 0;
+}
+.cl-status.st-ok   { background: #e6f6e8; color: #2e7d32; }
+.cl-status.st-warn { background: #fdecea; color: #c62828; }
+.cl-info { flex: 1; font-size: 12.5px; color: #444; }
+.cl-link {
+  font-size: 12px; text-decoration: none; flex-shrink: 0;
+  padding: 5px 12px; border-radius: 5px; background: #1a3a6b; color: #fff;
+}
+.cl-link:hover { background: #0f2755; }
+.cl-nolink { font-size: 11px; color: #bbb; flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -174,6 +262,9 @@ td.cell.c-na    { background: #f4f4f4; cursor: default; color: transparent; }
   <h1>СС · Шахматка</h1>
   <button class="btn" onclick="reload()">↺ Обновить</button>
   <button class="btn btn-pri" id="auth-btn" onclick="openPwd(null)">🔐 Войти</button>
+  <button class="btn" onclick="openWhatsNew()" title="Что нового">✨ Что нового</button>
+  <label class="chk-toggle" title="Показать количество чек-листов в ячейках">
+    <input type="checkbox" id="chk-mode" onchange="toggleCheckMode()"> 📋 Чек листы</label>
   <button class="btn" onclick="changeZoom(-10)">−</button>
   <span id="zoom-val">100%</span>
   <button class="btn" onclick="changeZoom(+10)">+</button>
@@ -217,6 +308,55 @@ td.cell.c-na    { background: #f4f4f4; cursor: default; color: transparent; }
 <!-- TOASTS -->
 <div id="toasts"></div>
 
+<!-- WHAT'S NEW MODAL -->
+<div id="wn-overlay" class="hide">
+  <div id="wn-box">
+    <div id="wn-head">
+      <span>✨</span><h3>Что нового</h3>
+      <span id="wn-date">Июнь 2026</span>
+    </div>
+    <div id="wn-body">
+      <div class="wn-item">
+        <span class="wn-ico">🏢</span>
+        <div class="wn-txt">
+          <b>Появился уровень «Подъезд»</b> — новый уровень заголовка между Корпусом и Захваткой.
+          <small>Работы теперь отображаются отдельно для каждого подъезда корпуса.</small>
+        </div>
+      </div>
+      <div class="wn-item">
+        <span class="wn-ico">🔢</span>
+        <div class="wn-txt">
+          <b>Один номер этажа в разных подъездах</b> больше не «склеивается».
+          <small>Каждая ячейка теперь точно привязана к своему подъезду и этажу.</small>
+        </div>
+      </div>
+      <div class="wn-item">
+        <span class="wn-ico">💡</span>
+        <div class="wn-txt">
+          <b>Откуда берётся подъезд</b> — из столбца «Доп признак» в листе «Факт».
+          <small>Если подъезд не виден — заполните «Доп признак» и нажмите «↺ Обновить».</small>
+        </div>
+      </div>
+    </div>
+    <div id="wn-foot">
+      <label><input type="checkbox" id="wn-dont"> Больше не показывать</label>
+      <button class="btn btn-pri" onclick="closeWhatsNew()">Понятно</button>
+    </div>
+  </div>
+</div>
+
+<!-- WORK CARD MODAL (чек-листы) -->
+<div id="card-overlay" class="hide" onclick="if(event.target===this)closeCard()">
+  <div id="card-box">
+    <div id="card-head">
+      <h3 id="card-title"></h3>
+      <button id="card-x" onclick="closeCard()">✕</button>
+    </div>
+    <div id="card-meta"></div>
+    <div id="card-checklists"></div>
+  </div>
+</div>
+
 <!-- PASSWORD MODAL -->
 <div id="pwd-overlay" class="hide">
   <div id="pwd-box">
@@ -234,11 +374,17 @@ td.cell.c-na    { background: #f4f4f4; cursor: default; color: transparent; }
 // ─── CONFIG ─────────────────────────────────────────────────────────────────
 var BASE = 'https://script.google.com/macros/s/AKfycbxWe1t4HXvXHaMkeXYcRFAzx3aJ-QErc98efb867aGhcUw0fogI5NO3X_fBeO_tvY3G/exec';
 
+// Версия списка изменений. Менять при обновлении модалки «Что нового» — тогда
+// окно снова покажется пользователям автоматически (если они не отключили его).
+var WN_VERSION = '2026-06-podezd';
+
 // ─── STATE ───────────────────────────────────────────────────────────────────
 var WORKS  = [];   // [{workId, razdel, sistema, work, lokacia, zahvatka, group, nameGrid}]
 var FLOORS = [];   // [{floorId, corpus, floor, pod}]
 var FACTS  = [];   // [{workId, floorId, status, date, pct}] — только непустые
 var FLOOR_POD = {}; // floorId → подъезд (Доп признак)
+var CHECK_BY_CELL = {}; // `workId\x00corpus\x00floor` → [{link,status,akt,date,id}]
+var CHECK_MODE = false; // режим показа количества чек-листов
 
 var WORKS_MAP    = {};  // workId → work
 var FLOOR_MAP    = {};  // floorId → {corpus, floor, pod}
@@ -263,8 +409,29 @@ window.onload = function () {
     IS_ADMIN = true;
     setAuthBtn(true);
   }
+  maybeShowWhatsNew();
   loadData();
 };
+
+// ─── WHAT'S NEW ───────────────────────────────────────────────────────────────
+function maybeShowWhatsNew() {
+  if (localStorage.getItem('cc_wn_off') === '1') return;       // отключено навсегда
+  if (localStorage.getItem('cc_wn') === WN_VERSION) return;    // уже видели эту версию
+  openWhatsNew();
+}
+
+function openWhatsNew() {
+  document.getElementById('wn-dont').checked = false;
+  document.getElementById('wn-overlay').classList.remove('hide');
+}
+
+function closeWhatsNew() {
+  localStorage.setItem('cc_wn', WN_VERSION);
+  if (document.getElementById('wn-dont').checked) {
+    localStorage.setItem('cc_wn_off', '1');
+  }
+  document.getElementById('wn-overlay').classList.add('hide');
+}
 
 // ─── ZOOM ─────────────────────────────────────────────────────────────────────
 function changeZoom(d) {
@@ -294,6 +461,7 @@ function loadData() {
       FLOORS = d.floors || [];
       FACTS  = d.facts  || [];
       FLOOR_POD = d.floorPod || {};
+      CHECK_BY_CELL = d.checkByCell || {};
       buildMaps();
       buildFilters();
       render();
@@ -485,7 +653,11 @@ function render() {
     var td = ev.target;
     while (td && td.tagName !== 'TD') td = td.parentElement;
     if (!td || !td.classList.contains('cell') || td.classList.contains('c-na')) return;
-    cellClick(td.dataset.corpus, td.dataset.pod, parseFloat(td.dataset.floor), td.dataset.work);
+    if (CHECK_MODE) {
+      openWorkCard(td.dataset.corpus, td.dataset.pod, parseFloat(td.dataset.floor), td.dataset.work);
+    } else {
+      cellClick(td.dataset.corpus, td.dataset.pod, parseFloat(td.dataset.floor), td.dataset.work);
+    }
   };
   fixStickyOffsets();
   updateStats(countStats(cols, floorNums));
@@ -549,7 +721,14 @@ function buildBody(cols, floorNums) {
       var isDone = fact && (fact.status === 'СМР окончены' || fact.pct === '100');
       var da = ' data-corpus="' + e(col.corpus) + '" data-pod="' + e(col.pod) + '" data-floor="' + floorNum + '" data-work="' + e(col.workId) + '"';
       var loc = col.corpus + (col.pod ? ' · ' + col.pod : '') + ' эт.' + floorNum;
-      if (isDone) {
+      var cls = isDone ? 'c-done' : 'c-empty';
+
+      if (CHECK_MODE) {
+        // Цвет готовности остаётся, но внутри — количество чек-листов
+        var n = checkCount(col.workId, col.corpus, floorNum);
+        var tipc = e(col.nameGrid + ' | ' + loc + ' | чек-листов: ' + n);
+        html += '<td class="cell ' + cls + ' c-count"' + da + ' title="' + tipc + '">' + (n > 0 ? n : '') + '</td>';
+      } else if (isDone) {
         var tip = e('Готово: ' + (fact.date || '') + ' | ' + col.nameGrid + ' | ' + loc);
         html += '<td class="cell c-done"' + da + ' title="' + tip + '">☑</td>';
       } else {
@@ -598,6 +777,71 @@ function updateStats(s) {
   document.getElementById('sb-total').textContent = s.total;
   document.getElementById('sb-done').textContent  = s.done;
   document.getElementById('sb-pct').textContent   = pct;
+}
+
+// ─── ЧЕК-ЛИСТЫ ────────────────────────────────────────────────────────────────
+function toggleCheckMode() {
+  CHECK_MODE = document.getElementById('chk-mode').checked;
+  render();
+}
+
+function cellCheckKey(workId, corpus, floorNum) {
+  return workId + '\x00' + corpus + '\x00' + floorNum;
+}
+function checkCount(workId, corpus, floorNum) {
+  var a = CHECK_BY_CELL[cellCheckKey(workId, corpus, floorNum)];
+  return a ? a.length : 0;
+}
+
+// Карточка работы с чек-листами (дата, номер акта, ссылка)
+function openWorkCard(corpus, pod, floorNum, workId) {
+  var w    = WORKS_MAP[workId] || {};
+  var list = CHECK_BY_CELL[cellCheckKey(workId, corpus, floorNum)] || [];
+  var loc  = corpus + (pod ? ' · ' + pod : '') + ' · этаж ' + floorNum;
+
+  document.getElementById('card-title').textContent = w.nameGrid || w.work || workId;
+
+  var meta = [];
+  if (w.sistema)  meta.push('Система: '   + w.sistema);
+  if (w.zahvatka) meta.push('Захватка: '  + w.zahvatka);
+  if (w.lokacia)  meta.push('Локация: '   + w.lokacia);
+  meta.push('Расположение: ' + loc);
+  document.getElementById('card-meta').innerHTML =
+    meta.map(function (m) { return '<div>' + e(m) + '</div>'; }).join('');
+
+  var cl = document.getElementById('card-checklists');
+  if (!list.length) {
+    cl.innerHTML = '<div class="cl-empty">Чек-листов нет</div>';
+  } else {
+    cl.innerHTML = '<div class="cl-head">Чек-листы (' + list.length + ')</div>' +
+      list.map(function (c) {
+        var st  = c.status || '';
+        var stCls = statusClass(st);
+        var info = [];
+        if (c.akt)  info.push('Акт: ' + c.akt);
+        if (c.date) info.push(c.date);
+        var link = c.link
+          ? '<a class="cl-link" href="' + e(c.link) + '" target="_blank" rel="noopener">Открыть ↗</a>'
+          : '<span class="cl-nolink">нет ссылки</span>';
+        return '<div class="cl-item">' +
+                 '<span class="cl-status' + stCls + '">' + e(st || '—') + '</span>' +
+                 '<div class="cl-info">' + e(info.join(' · ')) + '</div>' +
+                 link +
+               '</div>';
+      }).join('');
+  }
+  document.getElementById('card-overlay').classList.remove('hide');
+}
+
+function statusClass(st) {
+  var s = String(st).toLowerCase();
+  if (s.indexOf('принят') >= 0 || s.indexOf('устранен') >= 0) return ' st-ok';
+  if (s.indexOf('замечан') >= 0) return ' st-warn';
+  return '';
+}
+
+function closeCard() {
+  document.getElementById('card-overlay').classList.add('hide');
 }
 
 // ─── CELL CLICK ───────────────────────────────────────────────────────────────
