@@ -47,6 +47,7 @@ function doGet(e) {
     var action = p.action || '';
 
     if (action === 'getData')       return jsonOut(getData());
+    if (action === 'getChecklists') return jsonOut(getChecklists());
     if (action === 'ping')          return ContentService.createTextOutput('OK').setMimeType(ContentService.MimeType.TEXT);
     if (action === 'checkPassword') return jsonOut({ ok: p.pwd === ADMIN_PASSWORD });
     if (action === 'clearCache')    { clearCache(); return jsonOut({ ok: true }); }
@@ -82,18 +83,27 @@ function doPost(e) {
 
 // ─── Основные данные ────────────────────────────────────────────────────────
 
+// Быстрый эндпоинт: сетка (работы/этажи/факт). Чек-листы грузятся отдельно (getChecklists),
+// т.к. их матчинг и JSON тяжёлые — иначе загрузка сетки блокируется на ~12с.
 function getData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var factData = readFacts(ss);
+  return {
+    works   : readWorks(ss),
+    floors  : readFloors(ss),
+    facts   : factData.facts,
+    floorPod: factData.floorPod,   // floorId → подъезд (Доп признак)
+  };
+}
+
+// Отдельный (тяжёлый) эндпоинт: связь ячеек с чек-листами. Грузится фоном.
+function getChecklists() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
   var chk = readChecklists(ss);
   addInternalChecklists(ss, chk.checkByCell); // внутренние чек-листы (загруженные через сайт)
   return {
-    works      : readWorks(ss),
-    floors     : readFloors(ss),
-    facts      : factData.facts,
-    floorPod   : factData.floorPod,   // floorId → подъезд (Доп признак)
-    checkByCell: chk.checkByCell,      // `workId\x00corpus\x00floor` → [{link,status,akt,date,id,source}]
-    checkStats : chk.stats,            // диагностика совпадений (для проверки связей)
+    checkByCell: chk.checkByCell, // `workId\x00corpus\x00floor` → [{link,status,akt,date,id,source}]
+    checkStats : chk.stats,       // диагностика совпадений
   };
 }
 

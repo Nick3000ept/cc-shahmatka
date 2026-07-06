@@ -476,6 +476,7 @@ var FACTS  = [];   // [{workId, floorId, status, date, pct}] — только н
 var FLOOR_POD = {}; // floorId → подъезд (Доп признак)
 var CHECK_BY_CELL = {}; // `workId\x00corpus\x00floor` → [{link,status,akt,date,id,source}]
 var CHECK_MODE = false; // режим показа количества чек-листов
+var CHECKS_LOADED = false; // чек-листы (checkByCell) подгружены фоном
 var ADD_MODE   = false; // режим выделения ячеек для нового чек-листа
 var SELECTED   = {};    // key → {workId, corpus, floor, nameGrid}
 var ADD_CORPUS = '';    // корпус текущего выделения (мультивыбор в пределах 1 корпуса)
@@ -555,17 +556,33 @@ function loadData() {
       FLOORS = d.floors || [];
       FACTS  = d.facts  || [];
       FLOOR_POD = d.floorPod || {};
-      CHECK_BY_CELL = d.checkByCell || {};
       buildMaps();
       buildFilters();
       render();
       hideLoader();
       setSt('ok', 'обновлено');
+      loadChecklists(); // тяжёлые чек-листы — фоном, не блокируя сетку
     })
     .catch(function (err) {
       hideLoader();
       setSt('err', 'ошибка');
       toast('Ошибка загрузки: ' + err.message, 'err', 6000);
+    });
+}
+
+// Тяжёлые чек-листы грузятся отдельно и не блокируют показ сетки.
+function loadChecklists() {
+  CHECKS_LOADED = false;
+  fetch(BASE + '?action=getChecklists')
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.error) throw new Error(d.error);
+      CHECK_BY_CELL = d.checkByCell || {};
+      CHECKS_LOADED = true;
+      if (CHECK_MODE) render(); // обновить счётчики, если режим уже включён
+    })
+    .catch(function () {
+      toast('Чек-листы не загрузились (сетка работает)', 'err', 5000);
     });
 }
 
@@ -879,6 +896,7 @@ function updateStats(s) {
 // ─── ЧЕК-ЛИСТЫ ────────────────────────────────────────────────────────────────
 function toggleCheckMode() {
   CHECK_MODE = document.getElementById('chk-mode').checked;
+  if (CHECK_MODE && !CHECKS_LOADED) toast('Чек-листы ещё загружаются…', 'inf');
   render();
 }
 

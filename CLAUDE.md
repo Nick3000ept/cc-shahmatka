@@ -109,7 +109,8 @@ HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" git push
 
 | Метод | action | Описание |
 |---|---|---|
-| GET | `getData` | Справочник, реестр этажей, факт + `floorPod` (floorId→подъезд) + `checkByCell` (связь с чек-листами) + `checkStats` |
+| GET | `getData` | Справочник, реестр этажей, факт + `floorPod` (floorId→подъезд). Быстрый (~0.6 МБ) |
+| GET | `getChecklists` | `checkByCell` (связь с чек-листами) + `checkStats`. Тяжёлый (~1.5 МБ), грузится фоном отдельным запросом |
 | GET | `checkPassword` | Сравнивает ?pwd= с ADMIN_PASSWORD |
 | GET | `clearCache` | Сбрасывает CacheService (cc_works_v2, cc_floors) |
 | GET | `saveCell` | Записывает/сбрасывает F–H в «Факт» по workId+floorId+undo |
@@ -131,6 +132,8 @@ HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" git push
 **Лист «Чек листы_внутренние»**: A ID(группа `IC-<ts>`) · B Дата · C Корпус · D ID_работы · E Этаж · F Статус · G Ссылка · H Файл · I Комментарий.
 
 `addInternalChecklists` дописывает эти записи в тот же `checkByCell` (ключ `workId\x00corpus\x00floor`, `source:'internal'`), поэтому счётчик и карточка показывают внешние и внутренние чек-листы вместе.
+
+**Производительность:** `checkByCell` при массовом заполнении K разрастается (>2 МБ, матчинг ~1900 строк «Чек листы»). Поэтому чек-листы вынесены в отдельный эндпоинт `getChecklists` и грузятся **фоном** (`loadChecklists`, `CHECKS_LOADED`) — сетка (`getData`) показывается сразу, не дожидаясь их.
 
 ⚠️ **Drive-scope**: `DriveApp` требует авторизации Диска у аккаунта `kuzkin@acons.group`. После первого деплоя с этой фичей нужно один раз открыть редактор Apps Script, запустить любую функцию (напр. `getOrCreateChecklistFolder`) и принять запрос доступа — иначе загрузка файла вернёт ошибку авторизации (чтение/шахматка при этом работают).
 
