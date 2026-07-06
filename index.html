@@ -88,13 +88,15 @@ select.fsel {
 .h-lokacia  { background: #7cb8f0; color: #222; z-index: 9; }
 .h-work {
   background: #d6e9fa; color: #222; z-index: 8;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
   writing-mode: vertical-lr;
   transform: rotate(180deg);
   height: 140px;
   vertical-align: bottom;
   padding: 6px 4px;
   text-align: left;
+  line-height: 1.15;
 }
 #board thead th:not(.rh):not(.h-work) { white-space: normal; word-break: break-word; vertical-align: middle; }
 
@@ -313,9 +315,6 @@ body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
   <label class="chk-toggle" title="Показать количество чек-листов в ячейках">
     <input type="checkbox" id="chk-mode" onchange="toggleCheckMode()"> 📋 Чек листы</label>
   <button class="btn" id="add-chk-btn" onclick="toggleAddMode()" title="Загрузить новый чек-лист">+ Чек-лист</button>
-  <button class="btn" onclick="changeZoom(-10)">−</button>
-  <span id="zoom-val">100%</span>
-  <button class="btn" onclick="changeZoom(+10)">+</button>
   <div class="sync"><div id="sdot"></div><span id="stxt">загрузка…</span></div>
 </div>
 
@@ -535,7 +534,8 @@ function changeZoom(d) {
   applyZoom();
 }
 function applyZoom() {
-  document.getElementById('zoom-val').textContent = ZOOM + '%';
+  var zv = document.getElementById('zoom-val');
+  if (zv) zv.textContent = ZOOM + '%';
   document.getElementById('zoom-wrap').style.zoom = ZOOM / 100;
 }
 
