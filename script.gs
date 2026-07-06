@@ -8,6 +8,8 @@ const REF_SHEET       = 'Справочник работ';
 const FLOORS_SHEET    = 'Реестр этажей';
 const CHK_HIER_SHEET  = 'Чек листы иерархия';
 const CHK_SHEET       = 'Чек листы';
+const CHK_INT_SHEET   = 'Чек листы_внутренние';
+const CHK_FOLDER_NAME = 'Чек листы СС';
 const ADMIN_PASSWORD  = 'adminCC';
 
 // Справочник работ — столбцы (0-индекс для массива)
@@ -69,6 +71,9 @@ function doPost(e) {
       saveCellFact(body.workId, body.floorId, !!body.undo);
       return jsonOut({ ok: true });
     }
+    if (body.action === 'addChecklist') {
+      return jsonOut(saveInternalChecklist(body));
+    }
     return jsonOut({ error: 'Unknown action' });
   } catch (err) {
     return jsonOut({ error: err.toString() });
@@ -81,12 +86,13 @@ function getData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var factData = readFacts(ss);
   var chk = readChecklists(ss);
+  addInternalChecklists(ss, chk.checkByCell); // внутренние чек-листы (загруженные через сайт)
   return {
     works      : readWorks(ss),
     floors     : readFloors(ss),
     facts      : factData.facts,
     floorPod   : factData.floorPod,   // floorId → подъезд (Доп признак)
-    checkByCell: chk.checkByCell,      // `workId\x00corpus\x00floor` → [{link,status,akt,date,id}]
+    checkByCell: chk.checkByCell,      // `workId\x00corpus\x00floor` → [{link,status,akt,date,id,source}]
     checkStats : chk.stats,            // диагностика совпадений (для проверки связей)
   };
 }
@@ -235,6 +241,7 @@ function readChecklists(ss) {
         akt   : String(r[7]).trim(),
         date  : formatDateOut(r[8]),
         link  : String(r[14]).trim() || String(r[15]).trim(),
+        source: 'external',
       };
       works.forEach(function (workId) {
         var key = workId + '\x00' + corpus + '\x00' + floor;
@@ -264,6 +271,30 @@ function readChecklists(ss) {
       unmatchedTop     : unmatchedTop,
     },
   };
+}
+
+// Внутренние чек-листы (лист «Чек листы_внутренние»): прямой ID_работы + корпус + этаж.
+// Дописываем в тот же checkByCell, что и внешние.
+// Колонки: A ID  B Дата  C Корпус  D ID_работы  E Этаж  F Статус  G Ссылка  H Файл  I Комментарий
+function addInternalChecklists(ss, checkByCell) {
+  var sheet = ss.getSheetByName(CHK_INT_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return;
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, 9).getValues().forEach(function (r) {
+    var workId = String(r[3]).trim();
+    var corpus = String(r[2]).trim();
+    if (!workId || !corpus) return;
+    var key = workId + '\x00' + corpus + '\x00' + floorNorm(r[4]);
+    (checkByCell[key] = checkByCell[key] || []).push({
+      id     : r[0],
+      status : String(r[5]).trim(),
+      akt    : '',
+      date   : formatDateOut(r[1]),
+      link   : String(r[6]).trim(),
+      file   : String(r[7]).trim(),
+      comment: String(r[8]).trim(),
+      source : 'internal',
+    });
+  });
 }
 
 // Ключ тройки имён (нормализованный): раздел \x00 подраздел \x00 работа
@@ -310,6 +341,63 @@ function saveCellFact(workId, floorId, undo) {
          .setValues([['СМР окончены', today, true]]);
   }
   SpreadsheetApp.flush();
+}
+
+// ─── Загрузка внутреннего чек-листа ──────────────────────────────────────────
+// body: { corpus, cells:[{workId, floor}], status, comment, fileName, mimeType, fileData(base64) }
+// Файл → папка «Чек листы СС» на Диске; по строке на каждую (работа+этаж) в лист.
+function saveInternalChecklist(body) {
+  var corpus  = String(body.corpus  || '').trim();
+  var cells   = body.cells || [];
+  var status  = String(body.status  || '').trim();
+  var comment = String(body.comment || '').trim();
+  if (!corpus)        throw new Error('Не указан корпус');
+  if (!cells.length)  throw new Error('Не выбраны работы');
+  if (!body.fileData) throw new Error('Файл не передан');
+
+  // 1) Файл на Google Диск (доступ «по ссылке»)
+  var folder = getOrCreateChecklistFolder();
+  var blob   = Utilities.newBlob(
+    Utilities.base64Decode(body.fileData),
+    body.mimeType || 'application/octet-stream',
+    body.fileName || ('checklist_' + Date.now())
+  );
+  var file = folder.createFile(blob);
+  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+  var url   = file.getUrl();
+  var fname = file.getName();
+
+  // 2) Строки в лист «Чек листы_внутренние» — по одной на (работа+этаж)
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CHK_INT_SHEET) || createInternalSheet(ss);
+  var group = 'IC-' + Date.now();
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd.MM.yyyy');
+  var rows  = cells.map(function (c) {
+    return [group, today, corpus, String(c.workId).trim(), c.floor, status, url, fname, comment];
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+  SpreadsheetApp.flush();
+
+  return { ok: true, id: group, url: url, rows: rows.length };
+}
+
+function createInternalSheet(ss) {
+  var sh = ss.insertSheet(CHK_INT_SHEET);
+  sh.getRange(1, 1, 1, 9).setValues([[
+    'ID', 'Дата', 'Корпус', 'ID_работы', 'Этаж', 'Статус', 'Ссылка', 'Файл', 'Комментарий'
+  ]]);
+  sh.setFrozenRows(1);
+  return sh;
+}
+
+function getOrCreateChecklistFolder() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('cc_chk_folder');
+  if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
+  var it = DriveApp.getFoldersByName(CHK_FOLDER_NAME);
+  var folder = it.hasNext() ? it.next() : DriveApp.createFolder(CHK_FOLDER_NAME);
+  props.setProperty('cc_chk_folder', folder.getId());
+  return folder;
 }
 
 // ─── Утилиты ────────────────────────────────────────────────────────────────

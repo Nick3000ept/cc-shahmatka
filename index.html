@@ -122,6 +122,9 @@ td.cell.c-empty { background: #fff; color: #bbb; }
 td.cell.c-empty:hover { background: #f0faf0; color: #4caf50; }
 td.cell.c-na    { background: #f4f4f4; cursor: default; color: transparent; }
 td.cell.c-count { font-size: 14px; font-weight: 700; }
+td.cell.c-sel   { box-shadow: inset 0 0 0 3px #ff9800; }
+body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
+#add-chk-btn.on { background: #ff9800; color: #fff; border-color: #ff9800; }
 
 
 /* ── EMPTY ── */
@@ -253,6 +256,50 @@ td.cell.c-count { font-size: 14px; font-weight: 700; }
 }
 .cl-link:hover { background: #0f2755; }
 .cl-nolink { font-size: 11px; color: #bbb; flex-shrink: 0; }
+.cl-src { font-size: 10px; color: #aaa; margin-left: 6px; }
+
+/* ── ADD-MODE ACTION BAR ── */
+#addbar {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  z-index: 480; background: #1a3a6b; color: #fff;
+  padding: 10px 16px; border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.25);
+  display: flex; align-items: center; gap: 12px;
+}
+#addbar.hide { display: none; }
+#addbar-info { font-size: 13px; }
+#addbar .btn { padding: 6px 14px; }
+
+/* ── UPLOAD MODAL ── */
+#up-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 560; padding: 16px;
+}
+#up-overlay.hide { display: none; }
+#up-box {
+  background: #fff; border-radius: 12px; width: 460px; max-width: 100%;
+  max-height: 88vh; display: flex; flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0,0,0,.22); overflow: hidden;
+}
+#up-head { background: #1a3a6b; color: #fff; padding: 14px 20px; display: flex; align-items: center; }
+#up-head h3 { font-size: 16px; font-weight: 700; }
+#up-x { margin-left: auto; background: none; border: none; color: #fff; font-size: 20px; cursor: pointer; }
+#up-body { padding: 16px 20px; overflow-y: auto; }
+.up-field { margin-bottom: 14px; }
+.up-field > label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
+.up-field select, .up-field textarea, .up-field input[type=file] {
+  width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 5px;
+  font-size: 13px; font-family: inherit;
+}
+#up-cells {
+  max-height: 150px; overflow-y: auto; border: 1px solid #eee; border-radius: 6px;
+  padding: 6px 8px; font-size: 12.5px;
+}
+#up-cells .up-cell { padding: 3px 0; color: #444; }
+#up-cells .up-cell b { color: #1a3a6b; }
+#up-foot { padding: 12px 20px; border-top: 1px solid #eee; display: flex; gap: 8px; justify-content: flex-end; }
+#up-save[disabled] { opacity: .6; cursor: default; }
 </style>
 </head>
 <body>
@@ -265,6 +312,7 @@ td.cell.c-count { font-size: 14px; font-weight: 700; }
   <button class="btn" onclick="openWhatsNew()" title="Что нового">✨ Что нового</button>
   <label class="chk-toggle" title="Показать количество чек-листов в ячейках">
     <input type="checkbox" id="chk-mode" onchange="toggleCheckMode()"> 📋 Чек листы</label>
+  <button class="btn" id="add-chk-btn" onclick="toggleAddMode()" title="Загрузить новый чек-лист">+ Чек-лист</button>
   <button class="btn" onclick="changeZoom(-10)">−</button>
   <span id="zoom-val">100%</span>
   <button class="btn" onclick="changeZoom(+10)">+</button>
@@ -345,6 +393,49 @@ td.cell.c-count { font-size: 14px; font-weight: 700; }
   </div>
 </div>
 
+<!-- ADD-MODE ACTION BAR (выделение ячеек) -->
+<div id="addbar" class="hide">
+  <span id="addbar-info">Выберите ячейки одного корпуса</span>
+  <button class="btn btn-pri" id="addbar-up" onclick="openUpload()">Загрузить чек-лист</button>
+  <button class="btn" onclick="cancelAdd()">Отмена</button>
+</div>
+
+<!-- UPLOAD MODAL -->
+<div id="up-overlay" class="hide" onclick="if(event.target===this)closeUpload()">
+  <div id="up-box">
+    <div id="up-head">
+      <h3>Новый чек-лист</h3>
+      <button id="up-x" onclick="closeUpload()">✕</button>
+    </div>
+    <div id="up-body">
+      <div class="up-field">
+        <label>Работы в чек-листе</label>
+        <div id="up-cells"></div>
+      </div>
+      <div class="up-field">
+        <label for="up-status">Статус</label>
+        <select id="up-status">
+          <option>Принято</option>
+          <option>Есть замечания</option>
+          <option>Замечания устранены</option>
+        </select>
+      </div>
+      <div class="up-field">
+        <label for="up-file">Файл (PDF или PNG)</label>
+        <input type="file" id="up-file" accept=".pdf,.png,application/pdf,image/png">
+      </div>
+      <div class="up-field">
+        <label for="up-comment">Комментарий (необязательно)</label>
+        <textarea id="up-comment" rows="2"></textarea>
+      </div>
+    </div>
+    <div id="up-foot">
+      <button class="btn" onclick="closeUpload()">Отмена</button>
+      <button class="btn btn-pri" id="up-save" onclick="submitUpload()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
 <!-- WORK CARD MODAL (чек-листы) -->
 <div id="card-overlay" class="hide" onclick="if(event.target===this)closeCard()">
   <div id="card-box">
@@ -383,8 +474,11 @@ var WORKS  = [];   // [{workId, razdel, sistema, work, lokacia, zahvatka, group,
 var FLOORS = [];   // [{floorId, corpus, floor, pod}]
 var FACTS  = [];   // [{workId, floorId, status, date, pct}] — только непустые
 var FLOOR_POD = {}; // floorId → подъезд (Доп признак)
-var CHECK_BY_CELL = {}; // `workId\x00corpus\x00floor` → [{link,status,akt,date,id}]
+var CHECK_BY_CELL = {}; // `workId\x00corpus\x00floor` → [{link,status,akt,date,id,source}]
 var CHECK_MODE = false; // режим показа количества чек-листов
+var ADD_MODE   = false; // режим выделения ячеек для нового чек-листа
+var SELECTED   = {};    // key → {workId, corpus, floor, nameGrid}
+var ADD_CORPUS = '';    // корпус текущего выделения (мультивыбор в пределах 1 корпуса)
 
 var WORKS_MAP    = {};  // workId → work
 var FLOOR_MAP    = {};  // floorId → {corpus, floor, pod}
@@ -653,7 +747,9 @@ function render() {
     var td = ev.target;
     while (td && td.tagName !== 'TD') td = td.parentElement;
     if (!td || !td.classList.contains('cell') || td.classList.contains('c-na')) return;
-    if (CHECK_MODE) {
+    if (ADD_MODE) {
+      toggleSelect(td);
+    } else if (CHECK_MODE) {
       openWorkCard(td.dataset.corpus, td.dataset.pod, parseFloat(td.dataset.floor), td.dataset.work);
     } else {
       cellClick(td.dataset.corpus, td.dataset.pod, parseFloat(td.dataset.floor), td.dataset.work);
@@ -722,6 +818,7 @@ function buildBody(cols, floorNums) {
       var da = ' data-corpus="' + e(col.corpus) + '" data-pod="' + e(col.pod) + '" data-floor="' + floorNum + '" data-work="' + e(col.workId) + '"';
       var loc = col.corpus + (col.pod ? ' · ' + col.pod : '') + ' эт.' + floorNum;
       var cls = isDone ? 'c-done' : 'c-empty';
+      if (SELECTED[selKey(col.workId, col.corpus, floorNum)]) cls += ' c-sel';
 
       if (CHECK_MODE) {
         // Цвет готовности остаётся, но внутри — количество чек-листов
@@ -819,13 +916,15 @@ function openWorkCard(corpus, pod, floorNum, workId) {
         var stCls = statusClass(st);
         var info = [];
         if (c.akt)  info.push('Акт: ' + c.akt);
+        if (c.file) info.push(c.file);
         if (c.date) info.push(c.date);
+        var src = c.source === 'internal' ? '<span class="cl-src">загружен</span>' : '';
         var link = c.link
           ? '<a class="cl-link" href="' + e(c.link) + '" target="_blank" rel="noopener">Открыть ↗</a>'
           : '<span class="cl-nolink">нет ссылки</span>';
         return '<div class="cl-item">' +
                  '<span class="cl-status' + stCls + '">' + e(st || '—') + '</span>' +
-                 '<div class="cl-info">' + e(info.join(' · ')) + '</div>' +
+                 '<div class="cl-info">' + e(info.join(' · ')) + src + '</div>' +
                  link +
                '</div>';
       }).join('');
@@ -842,6 +941,131 @@ function statusClass(st) {
 
 function closeCard() {
   document.getElementById('card-overlay').classList.add('hide');
+}
+
+// ─── ДОБАВЛЕНИЕ ЧЕК-ЛИСТА (выделение + загрузка) ─────────────────────────────
+function selKey(workId, corpus, floor) { return workId + '\x00' + corpus + '\x00' + floor; }
+
+function toggleAddMode() {
+  if (!ADD_MODE) {
+    if (!IS_ADMIN) { openPwd(function () { toggleAddMode(); }); return; }
+    ADD_MODE = true;
+    CHECK_MODE = false; document.getElementById('chk-mode').checked = false; // клик = выделение
+    SELECTED = {}; ADD_CORPUS = '';
+    document.body.classList.add('add-mode');
+    document.getElementById('add-chk-btn').classList.add('on');
+    document.getElementById('addbar').classList.remove('hide');
+    updateAddbar();
+    render();
+  } else {
+    cancelAdd();
+  }
+}
+
+function cancelAdd() {
+  ADD_MODE = false; SELECTED = {}; ADD_CORPUS = '';
+  document.body.classList.remove('add-mode');
+  document.getElementById('add-chk-btn').classList.remove('on');
+  document.getElementById('addbar').classList.add('hide');
+  render();
+}
+
+function toggleSelect(td) {
+  var corpus = td.dataset.corpus;
+  var floor  = parseFloat(td.dataset.floor);
+  var workId = td.dataset.work;
+
+  if (!Object.keys(SELECTED).length) ADD_CORPUS = corpus;
+  else if (corpus !== ADD_CORPUS) {
+    toast('Чек-лист оформляется в пределах одного корпуса (' + ADD_CORPUS + ')', 'err');
+    return;
+  }
+
+  var key = selKey(workId, corpus, floor);
+  if (SELECTED[key]) {
+    delete SELECTED[key];
+    td.classList.remove('c-sel');
+  } else {
+    var w = WORKS_MAP[workId] || {};
+    SELECTED[key] = { workId: workId, corpus: corpus, floor: floor, nameGrid: w.nameGrid || w.work || workId };
+    td.classList.add('c-sel');
+  }
+  if (!Object.keys(SELECTED).length) ADD_CORPUS = '';
+  updateAddbar();
+}
+
+function updateAddbar() {
+  var n = Object.keys(SELECTED).length;
+  document.getElementById('addbar-info').textContent =
+    n ? ('Корпус ' + ADD_CORPUS + ' · выбрано ячеек: ' + n) : 'Выберите ячейки одного корпуса';
+  document.getElementById('addbar-up').disabled = !n;
+}
+
+function openUpload() {
+  var keys = Object.keys(SELECTED);
+  if (!keys.length) { toast('Выберите хотя бы одну ячейку', 'err'); return; }
+  var items = keys.map(function (k) { return SELECTED[k]; }).sort(function (a, b) {
+    return a.nameGrid === b.nameGrid ? a.floor - b.floor : (a.nameGrid < b.nameGrid ? -1 : 1);
+  });
+  document.getElementById('up-cells').innerHTML = items.map(function (c) {
+    return '<div class="up-cell"><b>' + e(c.nameGrid) + '</b> · ' + e(c.corpus) + ' эт.' + c.floor + '</div>';
+  }).join('');
+  document.getElementById('up-file').value    = '';
+  document.getElementById('up-comment').value = '';
+  document.getElementById('up-status').selectedIndex = 0;
+  var sv = document.getElementById('up-save');
+  sv.disabled = false; sv.textContent = 'Сохранить';
+  document.getElementById('up-overlay').classList.remove('hide');
+}
+
+function closeUpload() { document.getElementById('up-overlay').classList.add('hide'); }
+
+function submitUpload() {
+  var f = document.getElementById('up-file').files[0];
+  if (!f) { toast('Выберите файл', 'err'); return; }
+  if (!/\.(pdf|png)$/i.test(f.name)) { toast('Допустимы только PDF или PNG', 'err'); return; }
+  if (f.size > 25 * 1024 * 1024) { toast('Файл больше 25 МБ', 'err'); return; }
+
+  var status  = document.getElementById('up-status').value;
+  var comment = document.getElementById('up-comment').value.trim();
+  var corpus  = ADD_CORPUS;
+  var cells   = Object.keys(SELECTED).map(function (k) {
+    return { workId: SELECTED[k].workId, floor: SELECTED[k].floor };
+  });
+
+  var sv = document.getElementById('up-save');
+  sv.disabled = true; sv.textContent = 'Загрузка…';
+  setSt('spin', 'загрузка файла…');
+
+  var reader = new FileReader();
+  reader.onload = function () {
+    var b64 = String(reader.result).split(',')[1] || '';
+    var payload = {
+      action: 'addChecklist', corpus: corpus, cells: cells,
+      status: status, comment: comment,
+      fileName: f.name, mimeType: f.type || 'application/octet-stream', fileData: b64,
+    };
+    fetch(BASE, { method: 'POST', body: JSON.stringify(payload) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
+        setSt('ok', 'сохранено');
+        toast('Чек-лист загружен (' + d.rows + ' ячеек)', 'ok');
+        closeUpload();
+        cancelAdd();
+        reload();
+      })
+      .catch(function (err) {
+        setSt('err', 'ошибка');
+        toast('Ошибка загрузки: ' + err.message, 'err', 6000);
+        sv.disabled = false; sv.textContent = 'Сохранить';
+      });
+  };
+  reader.onerror = function () {
+    toast('Не удалось прочитать файл', 'err');
+    sv.disabled = false; sv.textContent = 'Сохранить';
+  };
+  reader.readAsDataURL(f);
 }
 
 // ─── CELL CLICK ───────────────────────────────────────────────────────────────

@@ -113,8 +113,26 @@ HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" git push
 | GET | `checkPassword` | Сравнивает ?pwd= с ADMIN_PASSWORD |
 | GET | `clearCache` | Сбрасывает CacheService (cc_works_v2, cc_floors) |
 | GET | `saveCell` | Записывает/сбрасывает F–H в «Факт» по workId+floorId+undo |
+| POST | `addChecklist` | Загружает файл чек-листа на Диск + пишет строки в «Чек листы_внутренние» |
 
 Параметры `saveCell`: `workId`, `floorId`, `undo` (true/false).
+Тело `addChecklist` (POST, `text/plain`, JSON): `{ corpus, cells:[{workId,floor}], status, comment, fileName, mimeType, fileData(base64) }`.
+
+## Внутренние чек-листы (загрузка через сайт)
+
+Пользователь загружает чек-листы прямо из шахматки:
+1. Кнопка **«+ Чек-лист»** в топбаре (требует входа) → режим выделения (`ADD_MODE`, `body.add-mode`).
+2. Клик по ячейкам выделяет их (`c-sel`, оранжевая рамка) — **только в пределах одного корпуса** (`ADD_CORPUS`).
+3. Нижняя панель `#addbar` → «Загрузить чек-лист» → модалка `#up-overlay`: статус, файл (PDF/PNG ≤25 МБ), комментарий.
+4. Файл читается как base64 и POST-ится на `addChecklist`.
+
+**Бэкенд** (`saveInternalChecklist`): файл → папка **«Чек листы СС»** на Диске (`getOrCreateChecklistFolder`, ID в Script Properties `cc_chk_folder`), доступ «по ссылке». Затем по строке на каждую (работа+этаж) в лист **«Чек листы_внутренние»** (создаётся автоматически, если нет).
+
+**Лист «Чек листы_внутренние»**: A ID(группа `IC-<ts>`) · B Дата · C Корпус · D ID_работы · E Этаж · F Статус · G Ссылка · H Файл · I Комментарий.
+
+`addInternalChecklists` дописывает эти записи в тот же `checkByCell` (ключ `workId\x00corpus\x00floor`, `source:'internal'`), поэтому счётчик и карточка показывают внешние и внутренние чек-листы вместе.
+
+⚠️ **Drive-scope**: `DriveApp` требует авторизации Диска у аккаунта `kuzkin@acons.group`. После первого деплоя с этой фичей нужно один раз открыть редактор Apps Script, запустить любую функцию (напр. `getOrCreateChecklistFolder`) и принять запрос доступа — иначе загрузка файла вернёт ошибку авторизации (чтение/шахматка при этом работают).
 
 ## Связь работ с чек-листами (`checkByCell`)
 
