@@ -10,6 +10,7 @@ const CHK_HIER_SHEET  = 'Чек листы иерархия';
 const CHK_SHEET       = 'Чек листы';
 const CHK_INT_SHEET   = 'Чек листы_внутренние';
 const CHK_FOLDER_NAME = 'Чек листы СС';
+const INCLUDE_EXTERNAL = false; // внешние чек-листы (лист «Чек листы» + иерархия) отключены; true — вернуть
 const ADMIN_PASSWORD  = 'adminCC';
 
 // Справочник работ — столбцы (0-индекс для массива)
@@ -102,11 +103,19 @@ function getData() {
 // Отдельный (тяжёлый) эндпоинт: связь ячеек с чек-листами. Грузится фоном.
 function getChecklists() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var chk = readChecklists(ss);
-  addInternalChecklists(ss, chk.checkByCell); // внутренние чек-листы (загруженные через сайт)
+  var checkByCell, stats;
+  if (INCLUDE_EXTERNAL) {
+    var chk = readChecklists(ss);
+    checkByCell = chk.checkByCell;
+    stats = chk.stats;
+  } else {
+    checkByCell = {};             // внешние отключены
+    stats = { external: 'off' };
+  }
+  addInternalChecklists(ss, checkByCell); // внутренние чек-листы (загруженные через сайт)
   return {
-    checkByCell: chk.checkByCell, // `workId\x00corpus\x00floor` → [{link,status,akt,date,id,source}]
-    checkStats : chk.stats,       // диагностика совпадений
+    checkByCell: checkByCell, // `workId\x00corpus\x00floor` → [{...,id,source}]
+    checkStats : stats,
   };
 }
 
