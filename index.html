@@ -599,7 +599,7 @@ function loadChecklists() {
       if (d.error) throw new Error(d.error);
       CHECK_BY_CELL = d.checkByCell || {};
       CHECKS_LOADED = true;
-      if (CHECK_MODE) render(); // обновить счётчики, если режим уже включён
+      render(); // обновить счётчики и окантовку статусов (в обоих режимах)
     })
     .catch(function () {
       toast('Чек-листы не загрузились (сетка работает)', 'err', 5000);
@@ -877,19 +877,21 @@ function buildBody(cols, floorNums) {
       var loc = col.corpus + (col.pod ? ' · ' + col.pod : '') + ' эт.' + floorNum;
       var cls = isDone ? 'c-done' : 'c-empty';
       if (SELECTED[selKey(col.workId, col.corpus, floorNum)]) cls += ' c-sel';
+      // Окантовка по статусу чек-листа — в обоих режимах (готовность и чек-листы)
+      var stCls  = checkStatusClass(col.workId, col.corpus, floorNum);
+      var stAttr = stCls ? ' ' + stCls : '';
 
       if (CHECK_MODE) {
-        // Цвет готовности остаётся, внутри — количество, окантовка — статус чек-листа
+        // Цвет готовности остаётся, внутри — количество чек-листов
         var n = checkCount(col.workId, col.corpus, floorNum);
-        var stCls = n > 0 ? checkStatusClass(col.workId, col.corpus, floorNum) : '';
         var tipc = e(col.nameGrid + ' | ' + loc + ' | чек-листов: ' + n);
-        html += '<td class="cell ' + cls + ' c-count' + (stCls ? ' ' + stCls : '') + '"' + da + ' title="' + tipc + '">' + (n > 0 ? n : '') + '</td>';
+        html += '<td class="cell ' + cls + ' c-count' + stAttr + '"' + da + ' title="' + tipc + '">' + (n > 0 ? n : '') + '</td>';
       } else if (isDone) {
         var tip = e('Готово: ' + (fact.date || '') + ' | ' + col.nameGrid + ' | ' + loc);
-        html += '<td class="cell c-done"' + da + ' title="' + tip + '">☑</td>';
+        html += '<td class="cell c-done' + stAttr + '"' + da + ' title="' + tip + '">☑</td>';
       } else {
         var tip2 = e(col.nameGrid + ' | ' + loc);
-        html += '<td class="cell c-empty"' + da + ' title="' + tip2 + '">☐</td>';
+        html += '<td class="cell c-empty' + stAttr + '"' + da + ' title="' + tip2 + '">☐</td>';
       }
     });
     html += '</tr>';
