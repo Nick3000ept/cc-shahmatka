@@ -1056,7 +1056,7 @@ function toggleAddMode() {
   if (!ADD_MODE) {
     if (!IS_ADMIN) { openPwd(function () { toggleAddMode(); }); return; }
     ADD_MODE = true;
-    CHECK_MODE = false; document.getElementById('chk-mode').checked = false; // клик = выделение
+    CHECK_MODE = true; document.getElementById('chk-mode').checked = true; // показываем счётчики чек-листов
     SELECTED = {}; ADD_CORPUS = '';
     document.body.classList.add('add-mode');
     document.getElementById('add-chk-btn').classList.add('on');
