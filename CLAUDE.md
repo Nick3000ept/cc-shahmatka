@@ -16,10 +16,17 @@ HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" clasp deploy --deploym
 
 # 2. Git + GitHub Pages
 # ⚠️ Прокси также блокирует git push — обходим так же
-git add index.html script.gs appsscript.json CLAUDE.md
+git add index.html script.gs appsscript.json CLAUDE.md .nojekyll
 git commit -m "описание"
 HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" git push
 ```
+
+**⚠️ GitHub Pages капризничает.** Легаси-сборщик:
+- падал на Jekyll («Page build failed») → в репо лежит **`.nojekyll`** (отключает Jekyll, файлы отдаются как есть). Не удалять.
+- иногда виснет в статусе `building`. Если после push сайт не обновился — **пнуть сборку**:
+  `gh api --method POST repos/Nick3000ept/cc-shahmatka/pages/builds`
+  Проверить статус: `gh api repos/Nick3000ept/cc-shahmatka/pages/builds/latest` (нужен `built`).
+- Пользователю после выкладки — **Ctrl+F5** (CDN/кеш браузера). Для мгновенной проверки правок — **exec-URL** (doGet отдаёт свежий `index.html` из clasp сразу, без Pages).
 
 ## Аккаунты
 - GAS: аккаунт `kuzkin@acons.group`
@@ -90,12 +97,17 @@ HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" git push
 - Зелёная ☑ = статус «СМР окончены» или PCT = true/TRUE/100
 - Серая = нет строки в реестре этажей для этой комбинации
 
-**Клик по ячейке:**
-1. Белая → оптимистично красится зелёной, затем фоном пишет в «Факт»: Статус=«СМР окончены», Дата=сегодня, PCT=true
-2. Зелёная → подтверждение «Снять отметку?» → очищает F–H
-3. При ошибке сервера — откат UI
+**Клик по ячейке — приоритет режимов** (обработчик на `#board`):
+1. **`ADD_MODE`** (кнопка «+ Чек-лист») → выделение ячейки (`toggleSelect`);
+2. иначе **`CHECK_MODE`** (чекбокс «📋 Чек листы») → открыть карточку работы (`openWorkCard`);
+3. иначе — **правка готовности** (`cellClick`):
+   - Белая → оптимистично зелёная, фоном пишет в «Факт»: Статус=«СМР окончены», Дата=сегодня, PCT=true;
+   - Зелёная → подтверждение «Снять отметку?» → очищает F–H;
+   - при ошибке сервера — откат UI.
 
-**Авторизация:** клик по ячейке без входа открывает модал пароля. После ввода `adminCC` сессия хранится в `sessionStorage` до закрытия вкладки. Кнопка «Войти» в топбаре позволяет войти заранее.
+**Авторизация:** правка (готовность, добавление/статус чек-листа) требует входа — без него клик открывает модал пароля. После ввода `adminCC` флаг в `sessionStorage` (`cc_admin`) до закрытия вкладки. Кнопка «Войти» — вход заранее. Гейт клиентский: сервер пароль при записи не проверяет. **Просмотр (в т.ч. чек-листы и карточка) открыт всем без входа.**
+
+Топбар: «↺ Обновить», «Войти», чекбокс «📋 Чек листы», «+ Чек-лист». Кнопки зума и «Что нового» удалены (модалка «Что нового» и её функции остались в коде, но не вызываются).
 
 ## Фильтры
 - **Корпус** — chips (К1, К2…); фильтрует также список этажей в строках
@@ -104,6 +116,7 @@ HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" git push
 - **Система** — select
 - **Локация** — select
 - **Работа** — select по «Название для шахматки»
+- **Чек-лист №** — текстовое поле (`#fchknum`). Оставляет только работы (столбцы), у которых есть чек-лист с этим номером (`worksByChecklistNumber` сверяет внутренний № и номер акта внешних). Работает после фоновой загрузки `checkByCell`.
 
 ## Эндпоинты GAS
 
@@ -118,7 +131,9 @@ HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" git push
 | POST | `setChecklistStatus` | Меняет статус (столбец F) во всех строках внутреннего чек-листа по `id` группы |
 
 Параметры `saveCell`: `workId`, `floorId`, `undo` (true/false).
-Тело `addChecklist` (POST, `text/plain`, JSON): `{ corpus, cells:[{workId,floor}], status, comment, fileName, mimeType, fileData(base64) }`.
+Тело `addChecklist` (POST, `text/plain`, JSON): `{ corpus, cells:[{workId,floor}], status, number, date(YYYY-MM-DD), comment, fileName, mimeType, fileData(base64) }`.
+Тело `setChecklistStatus`: `{ id, status }`.
+POST шлётся с `Content-Type: text/plain` (простой запрос, без CORS-preflight); GAS обрабатывает body до 302-редиректа на googleusercontent.
 
 ## Внутренние чек-листы (загрузка через сайт)
 
@@ -150,7 +165,10 @@ HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" git push
 3. Лист **«Чек листы»** матчится по той же тройке (E/F/G) **+ Корпус (C) + Этаж (D)**; ссылка = **O «Файлы (S3)»** (или P «Google Drive URL»).
 4. Ячейка шахматки = (workId из Факта, корпус, этаж).
 
-`getData` отдаёт `checkByCell`: ключ `workId\x00corpus\x00floor` → массив `[{link, status, akt, date, id}]`.
+`getChecklists` отдаёт `checkByCell`: ключ `workId\x00corpus\x00floor` → массив записей.
+- внешние: `{id, status, akt, date, link, source:'external'}`;
+- внутренние: `{id, status, number, date, link, file, comment, source:'internal'}`.
+
 Имена нормализуются (`trim` + lowercase + схлопывание пробелов), этаж — через `floorNorm` (запятая→точка, parseFloat).
 
 `checkStats` в ответе — диагностика: сколько кодов в иерархии, сколько работ с кодом, сколько кодов не найдено,
@@ -160,7 +178,7 @@ HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" git push
 - Чекбокс **«📋 Чек листы»** в топбаре (`#chk-mode`, `CHECK_MODE`). При включении:
   - в ячейках сохраняется цвет готовности (зелёная/белая), но вместо ☑/☐ выводится **количество чек-листов** (`c-count`); пусто, если 0;
   - клик по ячейке открывает **карточку работы** (`#card-overlay`) вместо переключения статуса.
-- Карточка: имя работы, система/захватка/локация/расположение, список чек-листов — статус (бейдж), номер акта, дата, кнопка **«Открыть ↗»** (ссылка `Файлы (S3)`).
+- Карточка: имя работы, система/захватка/локация/расположение, список чек-листов. По каждому: статус, **акт (внешние) / № (внутренние)**, имя файла, дата, кнопка **«Открыть ↗»** (ссылка). У внутренних админу вместо бейджа — `<select>` для смены статуса (`statusSelect` → `changeChecklistStatus` → `setChecklistStatus`, на всю группу).
 - Ключ поиска чек-листов на фронте: `workId\x00corpus\x00floorNum` (совпадает с `checkByCell`). Подъезд в ключе не участвует — чек-листы его не различают, поэтому одинаковые ячейки разных подъездов показывают один и тот же набор.
 
 ## Кеширование
@@ -174,6 +192,9 @@ HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" git push
 - **onclick в innerHTML**: нельзя использовать `JSON.stringify()` в атрибутах onclick — двойные кавычки ломают HTML. Вместо этого используются `data-*` атрибуты + event delegation на `#board`
 - **LockService**: убран из `saveCellFact` — каждая ячейка пишет в уникальную строку, конкурентных конфликтов нет; замок создавал очередь и таймауты при быстрых кликах
 - **Оптимистичный UI**: ячейка обновляется мгновенно при клике, запрос к GAS идёт фоном; при ошибке — откат
+- **GitHub Pages / Jekyll**: нужен `.nojekyll`; легаси-сборщик иногда виснет — пинать через `gh api --method POST .../pages/builds` (см. раздел «Деплой»)
+- **POST к GAS**: слать с `text/plain` body (иначе CORS-preflight, который GAS не обрабатывает)
+- **Drive-scope**: `DriveApp` (загрузка файлов) — разовая авторизация Диска у `kuzkin@acons.group` через редактор Apps Script (см. раздел про внутренние чек-листы)
 
 ## Правила безопасности
 
