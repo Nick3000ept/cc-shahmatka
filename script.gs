@@ -285,11 +285,11 @@ function readChecklists(ss) {
 
 // Внутренние чек-листы (лист «Чек листы_внутренние»): прямой ID_работы + корпус + этаж.
 // Дописываем в тот же checkByCell, что и внешние.
-// Колонки: A ID  B Дата  C Корпус  D ID_работы  E Этаж  F Статус  G Ссылка  H Файл  I Комментарий
+// Колонки: A ID  B Дата  C Корпус  D ID_работы  E Этаж  F Статус  G Ссылка  H Файл  I Комментарий  J Номер
 function addInternalChecklists(ss, checkByCell) {
   var sheet = ss.getSheetByName(CHK_INT_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return;
-  sheet.getRange(2, 1, sheet.getLastRow() - 1, 9).getValues().forEach(function (r) {
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, 10).getValues().forEach(function (r) {
     var workId = String(r[3]).trim();
     var corpus = String(r[2]).trim();
     if (!workId || !corpus) return;
@@ -298,6 +298,7 @@ function addInternalChecklists(ss, checkByCell) {
       id     : r[0],
       status : String(r[5]).trim(),
       akt    : '',
+      number : String(r[9]).trim(),
       date   : formatDateOut(r[1]),
       link   : String(r[6]).trim(),
       file   : String(r[7]).trim(),
@@ -361,6 +362,8 @@ function saveInternalChecklist(body) {
   var cells   = body.cells || [];
   var status  = String(body.status  || '').trim();
   var comment = String(body.comment || '').trim();
+  var number  = String(body.number  || '').trim();       // номер чек-листа
+  var dateStr = normDateIn(body.date);                    // дата чек-листа (dd.MM.yyyy)
   if (!corpus)        throw new Error('Не указан корпус');
   if (!cells.length)  throw new Error('Не выбраны работы');
   if (!body.fileData) throw new Error('Файл не передан');
@@ -380,10 +383,11 @@ function saveInternalChecklist(body) {
   // 2) Строки в лист «Чек листы_внутренние» — по одной на (работа+этаж)
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CHK_INT_SHEET) || createInternalSheet(ss);
+  // Гарантируем шапку столбца J «Номер» (если лист создан старой версией на 9 столбцов)
+  if (String(sheet.getRange(1, 10).getValue()).trim() !== 'Номер') sheet.getRange(1, 10).setValue('Номер');
   var group = 'IC-' + Date.now();
-  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd.MM.yyyy');
   var rows  = cells.map(function (c) {
-    return [group, today, corpus, String(c.workId).trim(), c.floor, status, url, fname, comment];
+    return [group, dateStr, corpus, String(c.workId).trim(), c.floor, status, url, fname, comment, number];
   });
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
   SpreadsheetApp.flush();
@@ -393,11 +397,20 @@ function saveInternalChecklist(body) {
 
 function createInternalSheet(ss) {
   var sh = ss.insertSheet(CHK_INT_SHEET);
-  sh.getRange(1, 1, 1, 9).setValues([[
-    'ID', 'Дата', 'Корпус', 'ID_работы', 'Этаж', 'Статус', 'Ссылка', 'Файл', 'Комментарий'
+  sh.getRange(1, 1, 1, 10).setValues([[
+    'ID', 'Дата', 'Корпус', 'ID_работы', 'Этаж', 'Статус', 'Ссылка', 'Файл', 'Комментарий', 'Номер'
   ]]);
   sh.setFrozenRows(1);
   return sh;
+}
+
+// Дата из формы (YYYY-MM-DD) → dd.MM.yyyy; пусто → сегодня
+function normDateIn(v) {
+  var s = String(v || '').trim();
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return m[3] + '.' + m[2] + '.' + m[1];
+  if (s) return s;
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd.MM.yyyy');
 }
 
 function getOrCreateChecklistFolder() {

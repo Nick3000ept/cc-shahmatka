@@ -290,7 +290,7 @@ body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
 #up-body { padding: 16px 20px; overflow-y: auto; }
 .up-field { margin-bottom: 14px; }
 .up-field > label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
-.up-field select, .up-field textarea, .up-field input[type=file] {
+.up-field select, .up-field textarea, .up-field input {
   width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 5px;
   font-size: 13px; font-family: inherit;
 }
@@ -311,7 +311,6 @@ body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
   <h1>СС · Шахматка</h1>
   <button class="btn" onclick="reload()">↺ Обновить</button>
   <button class="btn btn-pri" id="auth-btn" onclick="openPwd(null)">🔐 Войти</button>
-  <button class="btn" onclick="openWhatsNew()" title="Что нового">✨ Что нового</button>
   <label class="chk-toggle" title="Показать количество чек-листов в ячейках">
     <input type="checkbox" id="chk-mode" onchange="toggleCheckMode()"> 📋 Чек листы</label>
   <button class="btn" id="add-chk-btn" onclick="toggleAddMode()" title="Загрузить новый чек-лист">+ Чек-лист</button>
@@ -331,6 +330,9 @@ body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
     <select class="fsel" id="flokacia" onchange="render()"><option value="">Все</option></select></div>
   <div><label>Работа</label>
     <select class="fsel" id="fwork" onchange="render()" style="max-width:200px"><option value="">Все</option></select></div>
+  <div><label>Чек-лист №</label>
+    <input class="fsel" id="fchknum" style="max-width:110px" placeholder="номер"
+      oninput="render()" title="Показать только работы этого чек-листа"></div>
   <button class="btn" onclick="clearFilters()" style="margin-left:4px">✕ Сбросить</button>
 </div>
 
@@ -420,6 +422,14 @@ body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
         </select>
       </div>
       <div class="up-field">
+        <label for="up-number">Номер чек-листа</label>
+        <input type="text" id="up-number" placeholder="напр. 12">
+      </div>
+      <div class="up-field">
+        <label for="up-date">Дата чек-листа</label>
+        <input type="date" id="up-date">
+      </div>
+      <div class="up-field">
         <label for="up-file">Файл (PDF или PNG)</label>
         <input type="file" id="up-file" accept=".pdf,.png,application/pdf,image/png">
       </div>
@@ -503,7 +513,6 @@ window.onload = function () {
     IS_ADMIN = true;
     setAuthBtn(true);
   }
-  maybeShowWhatsNew();
   loadData();
 };
 
@@ -707,6 +716,7 @@ function clearFilters() {
   document.getElementById('fsistema').value  = '';
   document.getElementById('flokacia').value  = '';
   document.getElementById('fwork').value     = '';
+  document.getElementById('fchknum').value   = '';
   render();
 }
 
@@ -722,6 +732,8 @@ function getFilteredCols() {
   var fs = document.getElementById('fsistema').value;
   var fl = document.getElementById('flokacia').value;
   var fw = document.getElementById('fwork').value;
+  var fn = document.getElementById('fchknum').value.trim();
+  var chkSet = fn ? worksByChecklistNumber(fn) : null;
   return ALL_COLS.filter(function (col) {
     if (fc && col.corpus   !== fc) return false;
     if (fg && col.group    !== fg) return false;
@@ -729,8 +741,26 @@ function getFilteredCols() {
     if (fs && col.sistema  !== fs) return false;
     if (fl && col.lokacia  !== fl) return false;
     if (fw && col.nameGrid !== fw) return false;
+    if (chkSet && !chkSet[col.workId + '\x00' + col.corpus]) return false;
     return true;
   });
+}
+
+// Работы (workId\x00corpus), у которых есть чек-лист с указанным номером (внутр. № или акт)
+function worksByChecklistNumber(num) {
+  var set = {};
+  for (var key in CHECK_BY_CELL) {
+    var recs = CHECK_BY_CELL[key];
+    for (var i = 0; i < recs.length; i++) {
+      var r = recs[i];
+      if (String(r.number || '').trim() === num || String(r.akt || '').trim() === num) {
+        var p = key.split('\x00'); // [workId, corpus, floor]
+        set[p[0] + '\x00' + p[1]] = true;
+        break;
+      }
+    }
+  }
+  return set;
 }
 
 // ─── RENDER ───────────────────────────────────────────────────────────────────
@@ -933,9 +963,10 @@ function openWorkCard(corpus, pod, floorNum, workId) {
         var st  = c.status || '';
         var stCls = statusClass(st);
         var info = [];
-        if (c.akt)  info.push('Акт: ' + c.akt);
-        if (c.file) info.push(c.file);
-        if (c.date) info.push(c.date);
+        if (c.akt)    info.push('Акт: ' + c.akt);
+        if (c.number) info.push('№ ' + c.number);
+        if (c.file)   info.push(c.file);
+        if (c.date)   info.push(c.date);
         var src = c.source === 'internal' ? '<span class="cl-src">загружен</span>' : '';
         var link = c.link
           ? '<a class="cl-link" href="' + e(c.link) + '" target="_blank" rel="noopener">Открыть ↗</a>'
@@ -1031,6 +1062,8 @@ function openUpload() {
   document.getElementById('up-file').value    = '';
   document.getElementById('up-comment').value = '';
   document.getElementById('up-status').selectedIndex = 0;
+  document.getElementById('up-number').value = '';
+  document.getElementById('up-date').value   = todayISO();
   var sv = document.getElementById('up-save');
   sv.disabled = false; sv.textContent = 'Сохранить';
   document.getElementById('up-overlay').classList.remove('hide');
@@ -1046,6 +1079,8 @@ function submitUpload() {
 
   var status  = document.getElementById('up-status').value;
   var comment = document.getElementById('up-comment').value.trim();
+  var number  = document.getElementById('up-number').value.trim();
+  var date    = document.getElementById('up-date').value; // YYYY-MM-DD
   var corpus  = ADD_CORPUS;
   var cells   = Object.keys(SELECTED).map(function (k) {
     return { workId: SELECTED[k].workId, floor: SELECTED[k].floor };
@@ -1060,7 +1095,7 @@ function submitUpload() {
     var b64 = String(reader.result).split(',')[1] || '';
     var payload = {
       action: 'addChecklist', corpus: corpus, cells: cells,
-      status: status, comment: comment,
+      status: status, comment: comment, number: number, date: date,
       fileName: f.name, mimeType: f.type || 'application/octet-stream', fileData: b64,
     };
     fetch(BASE, { method: 'POST', body: JSON.stringify(payload) })
@@ -1175,6 +1210,12 @@ function fmtToday() {
   var d = new Date();
   var p = function (n) { return n < 10 ? '0' + n : String(n); };
   return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear();
+}
+
+function todayISO() {
+  var d = new Date();
+  var p = function (n) { return n < 10 ? '0' + n : String(n); };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
 }
 
 function naturalSort(a, b) {
