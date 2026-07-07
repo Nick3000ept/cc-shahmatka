@@ -75,6 +75,9 @@ function doPost(e) {
     if (body.action === 'addChecklist') {
       return jsonOut(saveInternalChecklist(body));
     }
+    if (body.action === 'setChecklistStatus') {
+      return jsonOut(setInternalChecklistStatus(body));
+    }
     return jsonOut({ error: 'Unknown action' });
   } catch (err) {
     return jsonOut({ error: err.toString() });
@@ -393,6 +396,30 @@ function saveInternalChecklist(body) {
   SpreadsheetApp.flush();
 
   return { ok: true, id: group, url: url, rows: rows.length };
+}
+
+// Сменить статус внутреннего чек-листа (всей группы) — обновляет столбец F во всех строках с этим ID
+function setInternalChecklistStatus(body) {
+  var id     = String(body.id     || '').trim();
+  var status = String(body.status || '').trim();
+  if (!id)     throw new Error('Не указан ID чек-листа');
+  if (!status) throw new Error('Не указан статус');
+
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CHK_INT_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) throw new Error('Лист «Чек листы_внутренние» пуст');
+
+  var n    = sheet.getLastRow() - 1;
+  var idA  = sheet.getRange(2, 1, n, 1).getValues();  // столбец A (ID группы)
+  var fCol = sheet.getRange(2, 6, n, 1).getValues();  // столбец F (Статус)
+  var updated = 0;
+  for (var i = 0; i < n; i++) {
+    if (String(idA[i][0]).trim() === id) { fCol[i][0] = status; updated++; }
+  }
+  if (!updated) throw new Error('Чек-лист не найден: ' + id);
+  sheet.getRange(2, 6, n, 1).setValues(fCol);
+  SpreadsheetApp.flush();
+  return { ok: true, updated: updated };
 }
 
 function createInternalSheet(ss) {

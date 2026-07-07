@@ -251,6 +251,12 @@ body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
 }
 .cl-status.st-ok   { background: #e6f6e8; color: #2e7d32; }
 .cl-status.st-warn { background: #fdecea; color: #c62828; }
+.cl-status-sel {
+  font-size: 11px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 8px;
+  max-width: 170px; background: #eef2f8; color: #34507f; cursor: pointer; flex-shrink: 0;
+}
+.cl-status-sel.st-ok   { background: #e6f6e8; color: #2e7d32; border-color: #bfe6c4; }
+.cl-status-sel.st-warn { background: #fdecea; color: #c62828; border-color: #f5c6c2; }
 .cl-info { flex: 1; font-size: 12.5px; color: #444; }
 .cl-link {
   font-size: 12px; text-decoration: none; flex-shrink: 0;
@@ -486,6 +492,7 @@ var FLOOR_POD = {}; // floorId → подъезд (Доп признак)
 var CHECK_BY_CELL = {}; // `workId\x00corpus\x00floor` → [{link,status,akt,date,id,source}]
 var CHECK_MODE = false; // режим показа количества чек-листов
 var CHECKS_LOADED = false; // чек-листы (checkByCell) подгружены фоном
+var STATUS_LIST = ['Принято', 'Есть замечания', 'Замечания устранены']; // статусы чек-листа
 var ADD_MODE   = false; // режим выделения ячеек для нового чек-листа
 var SELECTED   = {};    // key → {workId, corpus, floor, nameGrid}
 var ADD_CORPUS = '';    // корпус текущего выделения (мультивыбор в пределах 1 корпуса)
@@ -968,11 +975,15 @@ function openWorkCard(corpus, pod, floorNum, workId) {
         if (c.file)   info.push(c.file);
         if (c.date)   info.push(c.date);
         var src = c.source === 'internal' ? '<span class="cl-src">загружен</span>' : '';
+        // Внутренние чек-листы админ может редактировать (статус на всю группу), внешние — read-only
+        var statusHtml = (c.source === 'internal' && IS_ADMIN)
+          ? statusSelect(st, c.id)
+          : '<span class="cl-status' + stCls + '">' + e(st || '—') + '</span>';
         var link = c.link
           ? '<a class="cl-link" href="' + e(c.link) + '" target="_blank" rel="noopener">Открыть ↗</a>'
           : '<span class="cl-nolink">нет ссылки</span>';
         return '<div class="cl-item">' +
-                 '<span class="cl-status' + stCls + '">' + e(st || '—') + '</span>' +
+                 statusHtml +
                  '<div class="cl-info">' + e(info.join(' · ')) + src + '</div>' +
                  link +
                '</div>';
@@ -986,6 +997,52 @@ function statusClass(st) {
   if (s.indexOf('принят') >= 0 || s.indexOf('устранен') >= 0) return ' st-ok';
   if (s.indexOf('замечан') >= 0) return ' st-warn';
   return '';
+}
+
+// Редактируемый статус внутреннего чек-листа (select)
+function statusSelect(cur, id) {
+  var opts = STATUS_LIST.slice();
+  if (cur && opts.indexOf(cur) < 0) opts.unshift(cur);
+  var o = opts.map(function (s) {
+    return '<option' + (s === cur ? ' selected' : '') + '>' + e(s) + '</option>';
+  }).join('');
+  return '<select class="cl-status-sel' + statusClass(cur) + '" data-chkid="' + e(id) +
+         '" data-prev="' + e(cur) + '" onchange="changeChecklistStatus(this)">' + o + '</select>';
+}
+
+function changeChecklistStatus(sel) {
+  var id     = sel.dataset.chkid;
+  var status = sel.value;
+  var prev   = sel.dataset.prev || '';
+  if (status === prev) return;
+  sel.disabled = true;
+  setSt('spin', '…');
+  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'setChecklistStatus', id: id, status: status }) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
+      setSt('ok', 'сохранено');
+      toast('Статус обновлён (' + d.updated + ' ячеек)', 'ok');
+      updateLocalChecklistStatus(id, status);
+      sel.dataset.prev = status;
+      sel.className = 'cl-status-sel' + statusClass(status);
+      sel.disabled = false;
+    })
+    .catch(function (err) {
+      sel.value = prev; // откат
+      sel.disabled = false;
+      setSt('err', 'ошибка');
+      toast('Ошибка: ' + err.message, 'err', 6000);
+    });
+}
+
+// Локально обновить статус во всех записях группы, чтобы карточка/данные были свежими
+function updateLocalChecklistStatus(id, status) {
+  for (var k in CHECK_BY_CELL) {
+    CHECK_BY_CELL[k].forEach(function (r) {
+      if (String(r.id) === String(id)) r.status = status;
+    });
+  }
 }
 
 function closeCard() {

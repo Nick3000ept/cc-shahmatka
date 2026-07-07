@@ -115,6 +115,7 @@ HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" git push
 | GET | `clearCache` | Сбрасывает CacheService (cc_works_v2, cc_floors) |
 | GET | `saveCell` | Записывает/сбрасывает F–H в «Факт» по workId+floorId+undo |
 | POST | `addChecklist` | Загружает файл чек-листа на Диск + пишет строки в «Чек листы_внутренние» |
+| POST | `setChecklistStatus` | Меняет статус (столбец F) во всех строках внутреннего чек-листа по `id` группы |
 
 Параметры `saveCell`: `workId`, `floorId`, `undo` (true/false).
 Тело `addChecklist` (POST, `text/plain`, JSON): `{ corpus, cells:[{workId,floor}], status, comment, fileName, mimeType, fileData(base64) }`.
@@ -129,7 +130,9 @@ HTTPS_PROXY="" HTTP_PROXY="" https_proxy="" http_proxy="" git push
 
 **Бэкенд** (`saveInternalChecklist`): файл → папка **«Чек листы СС»** на Диске (`getOrCreateChecklistFolder`, ID в Script Properties `cc_chk_folder`), доступ «по ссылке». Затем по строке на каждую (работа+этаж) в лист **«Чек листы_внутренние»** (создаётся автоматически, если нет).
 
-**Лист «Чек листы_внутренние»**: A ID(группа `IC-<ts>`) · B Дата · C Корпус · D ID_работы · E Этаж · F Статус · G Ссылка · H Файл · I Комментарий.
+**Лист «Чек листы_внутренние»**: A ID(группа `IC-<ts>`) · B Дата · C Корпус · D ID_работы · E Этаж · F Статус · G Ссылка · H Файл · I Комментарий · J Номер.
+
+**Смена статуса** (`setChecklistStatus`): в карточке работы у внутренних чек-листов (`source:'internal'`) админу показывается `<select>` вместо бейджа; выбор меняет статус **для всей группы** (всех строк с этим `id`) — столбец F. Внешние чек-листы — read-only (зеркало acons-app, правка затёрлась бы при синхронизации).
 
 `addInternalChecklists` дописывает эти записи в тот же `checkByCell` (ключ `workId\x00corpus\x00floor`, `source:'internal'`), поэтому счётчик и карточка показывают внешние и внутренние чек-листы вместе.
 
