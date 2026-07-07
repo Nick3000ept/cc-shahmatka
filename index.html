@@ -124,6 +124,10 @@ td.cell.c-empty { background: #fff; color: #bbb; }
 td.cell.c-empty:hover { background: #f0faf0; color: #4caf50; }
 td.cell.c-na    { background: #f4f4f4; cursor: default; color: transparent; }
 td.cell.c-count { font-size: 14px; font-weight: 700; }
+/* Окантовка по статусу чек-листа */
+td.cell.c-st-red    { box-shadow: inset 0 0 0 3px #e53935; } /* Есть замечания */
+td.cell.c-st-yellow { box-shadow: inset 0 0 0 3px #f9a825; } /* Замечания устранены */
+td.cell.c-st-green  { box-shadow: inset 0 0 0 3px #1b5e20; } /* Принято */
 td.cell.c-sel   { box-shadow: inset 0 0 0 3px #ff9800; }
 body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
 #add-chk-btn.on { background: #ff9800; color: #fff; border-color: #ff9800; }
@@ -875,10 +879,11 @@ function buildBody(cols, floorNums) {
       if (SELECTED[selKey(col.workId, col.corpus, floorNum)]) cls += ' c-sel';
 
       if (CHECK_MODE) {
-        // Цвет готовности остаётся, но внутри — количество чек-листов
+        // Цвет готовности остаётся, внутри — количество, окантовка — статус чек-листа
         var n = checkCount(col.workId, col.corpus, floorNum);
+        var stCls = n > 0 ? checkStatusClass(col.workId, col.corpus, floorNum) : '';
         var tipc = e(col.nameGrid + ' | ' + loc + ' | чек-листов: ' + n);
-        html += '<td class="cell ' + cls + ' c-count"' + da + ' title="' + tipc + '">' + (n > 0 ? n : '') + '</td>';
+        html += '<td class="cell ' + cls + ' c-count' + (stCls ? ' ' + stCls : '') + '"' + da + ' title="' + tipc + '">' + (n > 0 ? n : '') + '</td>';
       } else if (isDone) {
         var tip = e('Готово: ' + (fact.date || '') + ' | ' + col.nameGrid + ' | ' + loc);
         html += '<td class="cell c-done"' + da + ' title="' + tip + '">☑</td>';
@@ -943,6 +948,24 @@ function cellCheckKey(workId, corpus, floorNum) {
 function checkCount(workId, corpus, floorNum) {
   var a = CHECK_BY_CELL[cellCheckKey(workId, corpus, floorNum)];
   return a ? a.length : 0;
+}
+
+// Класс окантовки ячейки по статусам её чек-листов
+// Приоритет: Есть замечания (красный) > Замечания устранены (жёлтый) > Принято (зелёный)
+function checkStatusClass(workId, corpus, floorNum) {
+  var recs = CHECK_BY_CELL[cellCheckKey(workId, corpus, floorNum)];
+  if (!recs || !recs.length) return '';
+  var warn = false, fixed = false, ok = false;
+  recs.forEach(function (r) {
+    var s = String(r.status || '').toLowerCase();
+    if (s.indexOf('замечан') >= 0 && s.indexOf('устранен') >= 0) fixed = true;
+    else if (s.indexOf('замечан') >= 0) warn = true;
+    else if (s.indexOf('принят') >= 0) ok = true;
+  });
+  if (warn)  return 'c-st-red';
+  if (fixed) return 'c-st-yellow';
+  if (ok)    return 'c-st-green';
+  return '';
 }
 
 // Карточка работы с чек-листами (дата, номер акта, ссылка)
