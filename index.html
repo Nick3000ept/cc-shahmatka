@@ -559,6 +559,22 @@ function applyZoom() {
   document.getElementById('zoom-wrap').style.zoom = ZOOM / 100;
 }
 
+// GET c автоповтором: GAS иногда отдаёт HTML-страницу вместо JSON (транзиент) —
+// парсим текст, и если это не JSON, повторяем несколько раз с паузой.
+function fetchJson(url, tries) {
+  tries = tries || 3;
+  return fetch(url).then(function (r) { return r.text(); }).then(function (t) {
+    try { return JSON.parse(t); }
+    catch (e) {
+      if (tries > 1) {
+        return new Promise(function (res) { setTimeout(res, 1500); })
+          .then(function () { return fetchJson(url, tries - 1); });
+      }
+      throw new Error('сервер вернул не-JSON (попробуйте ещё раз)');
+    }
+  });
+}
+
 // ─── DATA ─────────────────────────────────────────────────────────────────────
 function reload() {
   fetch(BASE + '?action=clearCache').catch(function () {});
@@ -568,8 +584,7 @@ function reload() {
 function loadData() {
   showLoader('Загрузка данных…');
   setSt('spin', 'загрузка…');
-  fetch(BASE + '?action=getData')
-    .then(function (r) { return r.json(); })
+  fetchJson(BASE + '?action=getData')
     .then(function (d) {
       if (d.error) throw new Error(d.error);
       WORKS  = d.works  || [];
@@ -593,8 +608,7 @@ function loadData() {
 // Тяжёлые чек-листы грузятся отдельно и не блокируют показ сетки.
 function loadChecklists() {
   CHECKS_LOADED = false;
-  fetch(BASE + '?action=getChecklists')
-    .then(function (r) { return r.json(); })
+  fetchJson(BASE + '?action=getChecklists')
     .then(function (d) {
       if (d.error) throw new Error(d.error);
       CHECK_BY_CELL = d.checkByCell || {};
