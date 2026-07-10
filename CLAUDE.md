@@ -200,6 +200,7 @@ POST шлётся с `Content-Type: text/plain` (простой запрос, б
 - **GitHub Pages / Jekyll**: нужен `.nojekyll`; легаси-сборщик иногда виснет — пинать через `gh api --method POST .../pages/builds` (см. раздел «Деплой»)
 - **POST к GAS**: слать с `text/plain` body (иначе CORS-preflight, который GAS не обрабатывает)
 - **Drive-scope**: `DriveApp` (загрузка файлов) — разовая авторизация Диска у `kuzkin@acons.group` через редактор Apps Script (см. раздел про внутренние чек-листы)
+- **Транзиентный HTML вместо JSON**: GAS exec иногда отдаёт HTML-страницу (редирект/ошибка/долгий ответ) → `JSON.parse` падает («Unexpected token `<`»). GET-запросы идут через **`fetchJson`** с автоповтором (до 3 раз, пауза 1.5с). `getData`/`getChecklists` отвечают медленно (~10–20с — латентность/холодный старт Google и открытие большой таблицы, не объём данных)
 
 ## Правила безопасности
 
