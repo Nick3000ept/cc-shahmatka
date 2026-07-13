@@ -889,14 +889,17 @@ function getFilteredCols() {
   });
 }
 
-// Работы (workId\x00corpus), у которых есть чек-лист с указанным номером (внутр. № или акт)
+// Работы (workId\x00corpus), у которых есть чек-лист с указанным номером (внутр. № или акт).
+// Совпадение частичное, без учёта регистра: «7» найдёт «7-С4.СБ3-АПС»
 function worksByChecklistNumber(num) {
+  var q = String(num).trim().toLowerCase();
   var set = {};
   for (var key in CHECK_BY_CELL) {
     var recs = CHECK_BY_CELL[key];
     for (var i = 0; i < recs.length; i++) {
       var r = recs[i];
-      if (String(r.number || '').trim() === num || String(r.akt || '').trim() === num) {
+      if (String(r.number || '').toLowerCase().indexOf(q) >= 0 ||
+          String(r.akt    || '').toLowerCase().indexOf(q) >= 0) {
         var p = key.split('\x00'); // [workId, corpus, floor]
         set[p[0] + '\x00' + p[1]] = true;
         break;
