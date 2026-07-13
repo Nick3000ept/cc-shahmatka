@@ -79,6 +79,9 @@ function doPost(e) {
     if (body.action === 'setChecklistStatus') {
       return jsonOut(setInternalChecklistStatus(body));
     }
+    if (body.action === 'deleteChecklist') {
+      return jsonOut(deleteInternalChecklist(body));
+    }
     return jsonOut({ error: 'Unknown action' });
   } catch (err) {
     return jsonOut({ error: err.toString() });
@@ -305,6 +308,7 @@ function addInternalChecklists(ss, checkByCell) {
     var workId = String(r[3]).trim();
     var corpus = String(r[2]).trim();
     if (!workId || !corpus) return;
+    if (String(r[5]).trim() === 'Удалён') return; // «мягко» удалённые не отдаём
     var key = workId + '\x00' + corpus + '\x00' + floorNorm(r[4]);
     (checkByCell[key] = checkByCell[key] || []).push({
       id     : r[0],
@@ -424,6 +428,30 @@ function setInternalChecklistStatus(body) {
   var updated = 0;
   for (var i = 0; i < n; i++) {
     if (String(idA[i][0]).trim() === id) { fCol[i][0] = status; updated++; }
+  }
+  if (!updated) throw new Error('Чек-лист не найден: ' + id);
+  sheet.getRange(2, 6, n, 1).setValues(fCol);
+  SpreadsheetApp.flush();
+  return { ok: true, updated: updated };
+}
+
+// «Удаление» внутреннего чек-листа. Строки из листа НЕ удаляются (правило безопасности) —
+// вся группа помечается статусом «Удалён» (столбец F) и перестаёт отдаваться фронту.
+// Файл на Диске остаётся. Восстановление — вручную вернуть прежний статус в листе.
+function deleteInternalChecklist(body) {
+  var id = String(body.id || '').trim();
+  if (!id) throw new Error('Не указан ID чек-листа');
+
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CHK_INT_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) throw new Error('Лист «Чек листы_внутренние» пуст');
+
+  var n    = sheet.getLastRow() - 1;
+  var idA  = sheet.getRange(2, 1, n, 1).getValues();  // столбец A (ID группы)
+  var fCol = sheet.getRange(2, 6, n, 1).getValues();  // столбец F (Статус)
+  var updated = 0;
+  for (var i = 0; i < n; i++) {
+    if (String(idA[i][0]).trim() === id) { fCol[i][0] = 'Удалён'; updated++; }
   }
   if (!updated) throw new Error('Чек-лист не найден: ' + id);
   sheet.getRange(2, 6, n, 1).setValues(fCol);

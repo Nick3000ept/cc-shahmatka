@@ -128,10 +128,44 @@ td.cell.c-count { font-size: 14px; font-weight: 700; }
 td.cell.c-st-red    { box-shadow: inset 0 0 0 3px #e53935; } /* Есть замечания */
 td.cell.c-st-yellow { box-shadow: inset 0 0 0 3px #f9a825; } /* Замечания устранены */
 td.cell.c-st-green  { box-shadow: inset 0 0 0 3px #1b5e20; } /* Принято */
+/* Подсветка ячеек выбранного в панели чек-листа */
+td.cell.c-chk-hl { box-shadow: inset 0 0 0 3px #2196f3; }
+td.rh.rh-hl      { background: #bbdefb; }
 td.cell.c-sel   { box-shadow: inset 0 0 0 3px #ff9800; }
 body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
 #add-chk-btn.on { background: #ff9800; color: #fff; border-color: #ff9800; }
 
+
+/* ── CHECKLIST PANEL (список чек-листов справа) ── */
+#chk-panel {
+  position: fixed; right: 12px; top: 150px; bottom: 16px; width: 300px;
+  background: #fff; border: 1px solid #ddd; border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.14);
+  z-index: 450; display: flex; flex-direction: column; overflow: hidden;
+}
+#chk-panel.hide { display: none; }
+#chk-panel-head {
+  padding: 10px 14px; background: #1a3a6b; color: #fff;
+  font-size: 13px; font-weight: 700; flex-shrink: 0;
+}
+#chk-panel-hint { padding: 6px 14px; font-size: 11px; color: #888; border-bottom: 1px solid #eee; flex-shrink: 0; }
+#chk-panel-list { overflow-y: auto; padding: 8px 10px; flex: 1; }
+.cp-item {
+  border: 1px solid #e4e8f0; border-radius: 8px;
+  padding: 8px 10px; margin-bottom: 8px; cursor: pointer;
+}
+.cp-item:hover { border-color: #99b3e6; background: #f7faff; }
+.cp-item.sel { border-color: #2196f3; box-shadow: inset 0 0 0 2px #2196f3; background: #f2f9ff; }
+.cp-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.cp-num { font-weight: 700; color: #1a3a6b; font-size: 13px; flex: 1; }
+.cp-del {
+  background: none; border: none; cursor: pointer;
+  font-size: 14px; padding: 0 2px; flex-shrink: 0; line-height: 1;
+}
+.cp-del:hover { transform: scale(1.15); }
+.cp-loc { font-size: 12px; color: #555; }
+.cp-empty { color: #aaa; font-size: 12.5px; padding: 10px 4px; }
+body.chk-open .board-wrap { margin-right: 324px; }
 
 /* ── EMPTY ── */
 #empty { text-align: center; padding: 48px; color: #aaa; font-size: 14px; }
@@ -361,6 +395,13 @@ body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
   </div>
 </div>
 
+<!-- CHECKLIST PANEL (список чек-листов по фильтру) -->
+<div id="chk-panel" class="hide">
+  <div id="chk-panel-head">📋 Чек-листы<span id="cp-count"></span></div>
+  <div id="chk-panel-hint">Клик по чек-листу — подсветить его этажи на шахматке</div>
+  <div id="chk-panel-list"></div>
+</div>
+
 <!-- LOADER -->
 <div id="loader"><div id="loader-box">Загрузка данных…</div></div>
 
@@ -495,6 +536,7 @@ var FACTS  = [];   // [{workId, floorId, status, date, pct}] — только н
 var FLOOR_POD = {}; // floorId → подъезд (Доп признак)
 var CHECK_BY_CELL = {}; // `workId\x00corpus\x00floor` → [{link,status,akt,date,id,source}]
 var CHECK_MODE = false; // режим показа количества чек-листов
+var SEL_CHK    = null;  // id чек-листа, выбранного в правой панели (подсветка ячеек)
 var CHECKS_LOADED = false; // чек-листы (checkByCell) подгружены фоном
 var STATUS_LIST = ['Принято', 'Есть замечания', 'Замечания устранены']; // статусы чек-листа
 var ADD_MODE   = false; // режим выделения ячеек для нового чек-листа
@@ -524,6 +566,20 @@ window.onload = function () {
     IS_ADMIN = true;
     setAuthBtn(true);
   }
+  // Панель чек-листов: клик по элементу — подсветка, по 🗑 — удаление
+  document.getElementById('chk-panel-list').onclick = function (ev) {
+    var del = ev.target.closest ? ev.target.closest('[data-del]') : null;
+    if (del) { requestDeleteChecklist(del.dataset.del, del.dataset.num); return; }
+    var item = ev.target.closest ? ev.target.closest('.cp-item') : null;
+    if (!item) return;
+    SEL_CHK = (String(SEL_CHK) === String(item.dataset.id)) ? null : item.dataset.id;
+    render();
+    if (SEL_CHK) {
+      var c = document.querySelector('#board td.c-chk-hl');
+      if (c && c.scrollIntoView) c.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+    }
+  };
+  window.addEventListener('resize', function () { if (CHECK_MODE) positionChkPanel(); });
   loadData();
 };
 
@@ -792,6 +848,8 @@ function worksByChecklistNumber(num) {
 function render() {
   var cols = getFilteredCols();
 
+  if (CHECK_MODE) renderChkPanel(cols);
+
   // Только этажи корпусов, реально попавших в отфильтрованные колонки
   var corpusSet = {};
   cols.forEach(function (col) { corpusSet[col.corpus] = true; });
@@ -876,8 +934,11 @@ function computeSpans(cols, keyPath) {
 
 function buildBody(cols, floorNums) {
   var html = '';
+  // Этажи выбранного в панели чек-листа — для подсветки заголовков строк
+  var selFloors = SEL_CHK ? chkFloorSet(SEL_CHK) : null;
   floorNums.forEach(function (floorNum) {
-    html += '<tr><td class="rh">' + floorNum + '</td>';
+    var rhCls = (selFloors && selFloors[String(floorNum)]) ? ' rh-hl' : '';
+    html += '<tr><td class="rh' + rhCls + '">' + floorNum + '</td>';
     cols.forEach(function (col) {
       var floorId = FLOOR_BY_KEY[floorKey(col.corpus, col.pod, floorNum)];
       if (!floorId) {
@@ -894,6 +955,8 @@ function buildBody(cols, floorNums) {
       // Окантовка по статусу чек-листа — в обоих режимах (готовность и чек-листы)
       var stCls  = checkStatusClass(col.workId, col.corpus, floorNum);
       var stAttr = stCls ? ' ' + stCls : '';
+      // Подсветка ячеек чек-листа, выбранного в правой панели
+      if (SEL_CHK && cellHasChecklist(col.workId, col.corpus, floorNum, SEL_CHK)) stAttr += ' c-chk-hl';
 
       if (CHECK_MODE) {
         // Цвет готовности остаётся, внутри — количество чек-листов
@@ -955,7 +1018,137 @@ function updateStats(s) {
 function toggleCheckMode() {
   CHECK_MODE = document.getElementById('chk-mode').checked;
   if (CHECK_MODE && !CHECKS_LOADED) toast('Чек-листы ещё загружаются…', 'inf');
+  if (!CHECK_MODE) SEL_CHK = null;
+  updateChkPanel();
   render();
+}
+
+// ─── ПАНЕЛЬ ЧЕК-ЛИСТОВ (справа) ──────────────────────────────────────────────
+function updateChkPanel() {
+  document.getElementById('chk-panel').classList.toggle('hide', !CHECK_MODE);
+  document.body.classList.toggle('chk-open', CHECK_MODE);
+  if (CHECK_MODE) positionChkPanel();
+}
+
+// Верх панели — сразу под статус-баром (высота шапок меняется при переносе строк)
+function positionChkPanel() {
+  var sb = document.querySelector('.statsbar');
+  var top = sb ? Math.round(sb.getBoundingClientRect().bottom) + 8 : 150;
+  document.getElementById('chk-panel').style.top = top + 'px';
+}
+
+// Чек-листы, попадающие в текущий фильтр (по отфильтрованным колонкам).
+// Группировка по id: один чек-лист может покрывать несколько работ и этажей.
+function collectChecklists(cols) {
+  var allowed = {};
+  cols.forEach(function (c) { allowed[c.workId + '\x00' + c.corpus] = true; });
+  var groups = {}, order = [];
+  for (var k in CHECK_BY_CELL) {
+    var p = k.split('\x00'); // [workId, corpus, floor]
+    if (!allowed[p[0] + '\x00' + p[1]]) continue;
+    var recs = CHECK_BY_CELL[k];
+    for (var i = 0; i < recs.length; i++) {
+      var r = recs[i];
+      var g = groups[r.id];
+      if (!g) {
+        g = groups[r.id] = {
+          id: r.id, number: r.number || '', akt: r.akt || '',
+          status: r.status || '', date: r.date || '',
+          corpus: p[1], source: r.source, floors: {},
+        };
+        order.push(g);
+      }
+      g.floors[p[2]] = true;
+    }
+  }
+  order.sort(function (a, b) {
+    if (a.corpus !== b.corpus) return naturalSort(a.corpus, b.corpus);
+    return naturalSort(String(a.number || a.akt || ''), String(b.number || b.akt || ''));
+  });
+  return order;
+}
+
+function renderChkPanel(cols) {
+  var box = document.getElementById('chk-panel-list');
+  if (!CHECKS_LOADED) {
+    document.getElementById('cp-count').textContent = '';
+    box.innerHTML = '<div class="cp-empty">Чек-листы загружаются…</div>';
+    return;
+  }
+  var list = collectChecklists(cols);
+  document.getElementById('cp-count').textContent = list.length ? ' (' + list.length + ')' : '';
+  if (!list.length) {
+    box.innerHTML = '<div class="cp-empty">По текущему фильтру чек-листов нет</div>';
+    return;
+  }
+  box.innerHTML = list.map(function (g) {
+    var num = g.number ? '№ ' + g.number : (g.akt ? 'Акт ' + g.akt : 'Без номера');
+    var fl = Object.keys(g.floors).sort(function (a, b) { return parseFloat(a) - parseFloat(b); });
+    var del = g.source === 'internal'
+      ? '<button class="cp-del" data-del="' + e(g.id) + '" data-num="' + e(g.number) + '" title="Удалить чек-лист">🗑</button>'
+      : '';
+    var sel = String(SEL_CHK) === String(g.id) ? ' sel' : '';
+    return '<div class="cp-item' + sel + '" data-id="' + e(g.id) + '">' +
+             '<div class="cp-top"><span class="cp-num">' + e(num) + '</span>' +
+             '<span class="cl-status' + statusClass(g.status) + '">' + e(g.status || '—') + '</span>' + del + '</div>' +
+             '<div class="cp-loc">' + e(g.corpus) + ' · эт. ' + e(fl.join(', ')) +
+             (g.date ? ' · ' + e(g.date) : '') + '</div>' +
+           '</div>';
+  }).join('');
+}
+
+// Есть ли у ячейки чек-лист с данным id
+function cellHasChecklist(workId, corpus, floorNum, id) {
+  var recs = CHECK_BY_CELL[cellCheckKey(workId, corpus, floorNum)];
+  if (!recs) return false;
+  for (var i = 0; i < recs.length; i++) {
+    if (String(recs[i].id) === String(id)) return true;
+  }
+  return false;
+}
+
+// Множество этажей (строкой) выбранного чек-листа — для подсветки заголовков строк
+function chkFloorSet(id) {
+  var set = {};
+  for (var k in CHECK_BY_CELL) {
+    var recs = CHECK_BY_CELL[k];
+    for (var i = 0; i < recs.length; i++) {
+      if (String(recs[i].id) === String(id)) { set[k.split('\x00')[2]] = true; break; }
+    }
+  }
+  return set;
+}
+
+// Удаление чек-листа (только внутренние, только админ, с подтверждением).
+// На сервере строки не удаляются, а помечаются статусом «Удалён» и скрываются.
+function requestDeleteChecklist(id, num) {
+  if (!IS_ADMIN) { openPwd(function () { requestDeleteChecklist(id, num); }); return; }
+  var name = num ? '№ ' + num : '';
+  if (!confirm('Удалить чек-лист ' + (name ? name + ' ' : '') + 'из шахматки?')) return;
+  setSt('spin', '…');
+  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'deleteChecklist', id: id }) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
+      removeLocalChecklist(id);
+      if (String(SEL_CHK) === String(id)) SEL_CHK = null;
+      setSt('ok', 'сохранено');
+      toast('Чек-лист удалён', 'ok');
+      render();
+    })
+    .catch(function (err) {
+      setSt('err', 'ошибка');
+      toast('Ошибка удаления: ' + err.message, 'err', 6000);
+    });
+}
+
+// Убрать чек-лист из локальных данных (после удаления на сервере)
+function removeLocalChecklist(id) {
+  for (var k in CHECK_BY_CELL) {
+    var left = CHECK_BY_CELL[k].filter(function (r) { return String(r.id) !== String(id); });
+    if (left.length) CHECK_BY_CELL[k] = left;
+    else delete CHECK_BY_CELL[k];
+  }
 }
 
 function cellCheckKey(workId, corpus, floorNum) {
@@ -1096,6 +1289,7 @@ function toggleAddMode() {
     if (!IS_ADMIN) { openPwd(function () { toggleAddMode(); }); return; }
     ADD_MODE = true;
     CHECK_MODE = true; document.getElementById('chk-mode').checked = true; // показываем счётчики чек-листов
+    updateChkPanel();
     SELECTED = {}; ADD_CORPUS = '';
     document.body.classList.add('add-mode');
     document.getElementById('add-chk-btn').classList.add('on');
