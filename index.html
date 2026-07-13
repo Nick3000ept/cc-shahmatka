@@ -158,25 +158,54 @@ body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
 .cp-item.sel { border-color: #2196f3; box-shadow: inset 0 0 0 2px #2196f3; background: #f2f9ff; }
 .cp-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .cp-num { font-weight: 700; color: #1a3a6b; font-size: 13px; flex: 1; }
-.cp-del {
-  background: none; border: none; cursor: pointer;
-  font-size: 14px; padding: 0 2px; flex-shrink: 0; line-height: 1;
-}
-.cp-del:hover { transform: scale(1.15); }
-.cp-photo {
-  background: none; border: none; cursor: pointer;
-  font-size: 13px; padding: 0 2px; flex-shrink: 0; line-height: 1;
-}
-.cp-photo:hover { transform: scale(1.15); }
 .cp-loc { font-size: 12px; color: #555; }
-.cp-files { font-size: 11.5px; margin-top: 4px; }
-.cp-files a { color: #1a3a6b; text-decoration: none; }
-.cp-files a:hover { text-decoration: underline; }
+/* Нижняя строка карточки: статус · фото · удалить */
+.cp-actions {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 6px; padding-top: 6px; border-top: 1px solid #f0f2f5;
+}
+.cp-actions .cl-status-sel { flex: 1; min-width: 0; max-width: none; }
+.cp-photo, .cp-del {
+  background: #fff; border: 1px solid #ccc; border-radius: 4px;
+  cursor: pointer; font-size: 12px; padding: 3px 8px; line-height: 1.2; flex-shrink: 0;
+}
+.cp-photo:hover { background: #f0f4ff; border-color: #99b3e6; }
+.cp-del { margin-left: auto; }
+.cp-del:hover { background: #fdecea; border-color: #f5c6c2; }
 .cp-empty { color: #aaa; font-size: 12.5px; padding: 10px 4px; }
 /* Догруженные фото в карточке работы */
 .cl-extra { margin-top: 4px; font-size: 11.5px; }
 .cl-extra a { color: #1a3a6b; margin-right: 10px; text-decoration: none; }
 .cl-extra a:hover { text-decoration: underline; }
+
+/* ── PHOTO MODAL (фотографии чек-листа) ── */
+#ph-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 570; padding: 16px;
+}
+#ph-overlay.hide { display: none; }
+#ph-box {
+  background: #fff; border-radius: 12px; width: 440px; max-width: 100%;
+  max-height: 85vh; display: flex; flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0,0,0,.22); overflow: hidden;
+}
+#ph-head { background: #1a3a6b; color: #fff; padding: 14px 20px; display: flex; align-items: center; }
+#ph-head h3 { font-size: 16px; font-weight: 700; }
+#ph-x { margin-left: auto; background: none; border: none; color: #fff; font-size: 20px; cursor: pointer; }
+#ph-body {
+  padding: 16px 20px; overflow-y: auto;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+}
+.ph-item {
+  display: block; text-decoration: none; color: #444;
+  border: 1px solid #e4e8f0; border-radius: 8px; overflow: hidden;
+}
+.ph-item:hover { border-color: #99b3e6; }
+.ph-thumb { width: 100%; height: 110px; object-fit: cover; display: block; background: #f0f2f5; }
+.ph-name { font-size: 11px; padding: 5px 8px; word-break: break-all; }
+.ph-empty { grid-column: 1 / -1; color: #aaa; font-size: 13px; padding: 8px 0; }
+#ph-foot { padding: 12px 20px; border-top: 1px solid #eee; display: flex; gap: 8px; justify-content: flex-end; }
 body.chk-open .board-wrap { margin-right: 324px; }
 
 /* ── EMPTY ── */
@@ -415,6 +444,21 @@ body.chk-open .board-wrap { margin-right: 324px; }
 </div>
 <input type="file" id="cp-photo-inp" accept="image/*,.pdf" multiple style="display:none">
 
+<!-- PHOTO MODAL (фотографии чек-листа) -->
+<div id="ph-overlay" class="hide" onclick="if(event.target===this)closePhotos()">
+  <div id="ph-box">
+    <div id="ph-head">
+      <h3 id="ph-title">Фотографии</h3>
+      <button id="ph-x" onclick="closePhotos()">✕</button>
+    </div>
+    <div id="ph-body"></div>
+    <div id="ph-foot">
+      <button class="btn" onclick="closePhotos()">Закрыть</button>
+      <button class="btn btn-pri" onclick="addPhotosFromModal()">＋ Добавить</button>
+    </div>
+  </div>
+</div>
+
 <!-- LOADER -->
 <div id="loader"><div id="loader-box">Загрузка данных…</div></div>
 
@@ -584,7 +628,7 @@ window.onload = function () {
     var del = ev.target.closest ? ev.target.closest('[data-del]') : null;
     if (del) { requestDeleteChecklist(del.dataset.del, del.dataset.num); return; }
     var ph = ev.target.closest ? ev.target.closest('[data-photo]') : null;
-    if (ph) { requestAddPhotos(ph.dataset.photo); return; }
+    if (ph) { openPhotoModal(ph.dataset.photo); return; }
     // Клики по селекту статуса и ссылкам на файлы не должны переключать подсветку
     if (ev.target.closest && ev.target.closest('select, a')) return;
     var item = ev.target.closest ? ev.target.closest('.cp-item') : null;
@@ -1104,29 +1148,23 @@ function renderChkPanel(cols) {
     var num = g.number ? '№ ' + g.number : (g.akt ? 'Акт ' + g.akt : 'Без номера');
     var fl = Object.keys(g.floors).sort(function (a, b) { return parseFloat(a) - parseFloat(b); });
     var isInt = g.source === 'internal';
-    // Внутренние чек-листы админ правит на месте: селект статуса + догрузка фото + удаление
+    // Нижняя строка карточки: статус (админу — селект) · фото · удалить
     var statusHtml = (isInt && IS_ADMIN)
       ? statusSelect(g.status, g.id)
       : '<span class="cl-status' + statusClass(g.status) + '">' + e(g.status || '—') + '</span>';
+    var nPhotos = (g.extra && g.extra.length) ? g.extra.length : 0;
     var photo = isInt
-      ? '<button class="cp-photo" data-photo="' + e(g.id) + '" title="Догрузить фотографии">📷</button>'
+      ? '<button class="cp-photo" data-photo="' + e(g.id) + '" title="Фотографии чек-листа">📷' + (nPhotos ? ' ' + nPhotos : '') + '</button>'
       : '';
     var del = isInt
       ? '<button class="cp-del" data-del="' + e(g.id) + '" data-num="' + e(g.number) + '" title="Удалить чек-лист">🗑</button>'
       : '';
-    var files = '';
-    if (g.extra && g.extra.length) {
-      files = '<div class="cp-files">📎 ' + g.extra.map(function (f, i) {
-        return '<a href="' + e(f.u) + '" target="_blank" rel="noopener" title="' + e(f.n || '') + '">фото ' + (i + 1) + '</a>';
-      }).join(' · ') + '</div>';
-    }
     var sel = String(SEL_CHK) === String(g.id) ? ' sel' : '';
     return '<div class="cp-item' + sel + '" data-id="' + e(g.id) + '">' +
-             '<div class="cp-top"><span class="cp-num">' + e(num) + '</span>' +
-             statusHtml + photo + del + '</div>' +
+             '<div class="cp-top"><span class="cp-num">' + e(num) + '</span></div>' +
              '<div class="cp-loc">' + e(g.corpus) + ' · эт. ' + e(fl.join(', ')) +
              (g.date ? ' · ' + e(g.date) : '') + '</div>' +
-             files +
+             '<div class="cp-actions">' + statusHtml + photo + del + '</div>' +
            '</div>';
   }).join('');
 }
@@ -1176,6 +1214,65 @@ function requestDeleteChecklist(id, num) {
     });
 }
 
+// ─── Модалка фотографий чек-листа ────────────────────────────────────────────
+var PH_MODAL_ID = null; // id чек-листа, открытого в модалке фотографий
+
+function openPhotoModal(id) {
+  PH_MODAL_ID = id;
+  renderPhotoModal();
+  document.getElementById('ph-overlay').classList.remove('hide');
+}
+
+function closePhotos() {
+  PH_MODAL_ID = null;
+  document.getElementById('ph-overlay').classList.add('hide');
+}
+
+function addPhotosFromModal() {
+  if (PH_MODAL_ID) requestAddPhotos(PH_MODAL_ID);
+}
+
+// Первая запись группы чек-листа (номер и список фото одинаковы во всей группе)
+function chkGroupInfo(id) {
+  for (var k in CHECK_BY_CELL) {
+    var recs = CHECK_BY_CELL[k];
+    for (var i = 0; i < recs.length; i++) {
+      if (String(recs[i].id) === String(id)) return recs[i];
+    }
+  }
+  return null;
+}
+
+// ID файла из ссылки Google Диска — для миниатюры
+function driveFileId(u) {
+  var m = String(u).match(/\/d\/([-\w]+)/) || String(u).match(/[?&]id=([-\w]+)/);
+  return m ? m[1] : '';
+}
+
+function renderPhotoModal() {
+  var rec  = chkGroupInfo(PH_MODAL_ID);
+  var list = (rec && rec.extra) || [];
+  document.getElementById('ph-title').textContent =
+    'Фотографии' + (rec && rec.number ? ' · № ' + rec.number : '');
+  var body = document.getElementById('ph-body');
+  if (!list.length) {
+    body.innerHTML = '<div class="ph-empty">Фотографий пока нет — нажмите «＋ Добавить»</div>';
+    return;
+  }
+  body.innerHTML = list.map(function (f, i) {
+    var fid   = driveFileId(f.u);
+    var thumb = fid
+      ? '<img class="ph-thumb" loading="lazy" alt="фото ' + (i + 1) + '"' +
+        ' src="https://drive.google.com/thumbnail?id=' + e(fid) + '&sz=w300"' +
+        ' onerror="this.style.display=\'none\'">'
+      : '';
+    return '<a class="ph-item" href="' + e(f.u) + '" target="_blank" rel="noopener">' +
+             thumb +
+             '<div class="ph-name">' + e(f.n || ('фото ' + (i + 1))) + '</div>' +
+           '</a>';
+  }).join('');
+}
+
 // ─── Догрузка фотографий к чек-листу ─────────────────────────────────────────
 var PHOTO_CHK = null; // id чек-листа, к которому догружаем фото
 
@@ -1206,6 +1303,7 @@ function uploadChecklistPhotos(fileList) {
       setSt('ok', 'сохранено');
       toast('Добавлено файлов: ' + done, 'ok');
       render();
+      if (PH_MODAL_ID) renderPhotoModal(); // модалка открыта — показать новые фото
       return;
     }
     var f = files[done];
@@ -1232,7 +1330,7 @@ function uploadChecklistPhotos(fileList) {
   function fail(err) {
     setSt('err', 'ошибка');
     toast('Ошибка загрузки файла «' + files[done].name + '»: ' + err.message, 'err', 6000);
-    if (done > 0) render(); // уже загруженные — показать
+    if (done > 0) { render(); if (PH_MODAL_ID) renderPhotoModal(); } // уже загруженные — показать
   }
   next();
 }
