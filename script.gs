@@ -82,6 +82,9 @@ function doPost(e) {
     if (body.action === 'deleteChecklist') {
       return jsonOut(deleteInternalChecklist(body));
     }
+    if (body.action === 'addChecklistFile') {
+      return jsonOut(addInternalChecklistFile(body));
+    }
     return jsonOut({ error: 'Unknown action' });
   } catch (err) {
     return jsonOut({ error: err.toString() });
@@ -301,14 +304,19 @@ function readChecklists(ss) {
 // Внутренние чек-листы (лист «Чек листы_внутренние»): прямой ID_работы + корпус + этаж.
 // Дописываем в тот же checkByCell, что и внешние.
 // Колонки: A ID  B Дата  C Корпус  D ID_работы  E Этаж  F Статус  G Ссылка  H Файл  I Комментарий  J Номер
+//          K Доп файлы (JSON-массив [{n:имя, u:ссылка}] — догруженные фотографии)
 function addInternalChecklists(ss, checkByCell) {
   var sheet = ss.getSheetByName(CHK_INT_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return;
-  sheet.getRange(2, 1, sheet.getLastRow() - 1, 10).getValues().forEach(function (r) {
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, 11).getValues().forEach(function (r) {
     var workId = String(r[3]).trim();
     var corpus = String(r[2]).trim();
     if (!workId || !corpus) return;
     if (String(r[5]).trim() === 'Удалён') return; // «мягко» удалённые не отдаём
+    var extra = [];
+    if (r[10]) {
+      try { var ex = JSON.parse(String(r[10])); if (ex && ex.length) extra = ex; } catch (e) {}
+    }
     var key = workId + '\x00' + corpus + '\x00' + floorNorm(r[4]);
     (checkByCell[key] = checkByCell[key] || []).push({
       id     : r[0],
@@ -319,6 +327,7 @@ function addInternalChecklists(ss, checkByCell) {
       link   : String(r[6]).trim(),
       file   : String(r[7]).trim(),
       comment: String(r[8]).trim(),
+      extra  : extra,
       source : 'internal',
     });
   });
@@ -433,6 +442,51 @@ function setInternalChecklistStatus(body) {
   sheet.getRange(2, 6, n, 1).setValues(fCol);
   SpreadsheetApp.flush();
   return { ok: true, updated: updated };
+}
+
+// Догрузка файла (фото) к существующему внутреннему чек-листу.
+// body: { id, fileName, mimeType, fileData(base64) }
+// Файл → папка «Чек листы СС»; запись [{n:имя, u:ссылка}] дописывается в JSON-массив
+// столбца K «Доп файлы» во всех строках группы.
+function addInternalChecklistFile(body) {
+  var id = String(body.id || '').trim();
+  if (!id)            throw new Error('Не указан ID чек-листа');
+  if (!body.fileData) throw new Error('Файл не передан');
+
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CHK_INT_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) throw new Error('Лист «Чек листы_внутренние» пуст');
+
+  var n   = sheet.getLastRow() - 1;
+  var idA = sheet.getRange(2, 1, n, 1).getValues();  // столбец A (ID группы)
+  var rowsIdx = [];
+  for (var i = 0; i < n; i++) {
+    if (String(idA[i][0]).trim() === id) rowsIdx.push(i + 2);
+  }
+  if (!rowsIdx.length) throw new Error('Чек-лист не найден: ' + id);
+
+  // Гарантируем шапку столбца K
+  if (String(sheet.getRange(1, 11).getValue()).trim() !== 'Доп файлы') sheet.getRange(1, 11).setValue('Доп файлы');
+
+  var folder = getOrCreateChecklistFolder();
+  var blob   = Utilities.newBlob(
+    Utilities.base64Decode(body.fileData),
+    body.mimeType || 'application/octet-stream',
+    body.fileName || ('photo_' + Date.now())
+  );
+  var file = folder.createFile(blob);
+  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+
+  var list = [];
+  try {
+    var cur = JSON.parse(String(sheet.getRange(rowsIdx[0], 11).getValue()));
+    if (cur && cur.length) list = cur;
+  } catch (e2) {}
+  list.push({ n: file.getName(), u: file.getUrl() });
+  var json = JSON.stringify(list);
+  rowsIdx.forEach(function (row) { sheet.getRange(row, 11).setValue(json); });
+  SpreadsheetApp.flush();
+  return { ok: true, name: file.getName(), url: file.getUrl(), files: list.length };
 }
 
 // «Удаление» внутреннего чек-листа. Строки из листа НЕ удаляются (правило безопасности) —

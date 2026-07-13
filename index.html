@@ -163,8 +163,20 @@ body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
   font-size: 14px; padding: 0 2px; flex-shrink: 0; line-height: 1;
 }
 .cp-del:hover { transform: scale(1.15); }
+.cp-photo {
+  background: none; border: none; cursor: pointer;
+  font-size: 13px; padding: 0 2px; flex-shrink: 0; line-height: 1;
+}
+.cp-photo:hover { transform: scale(1.15); }
 .cp-loc { font-size: 12px; color: #555; }
+.cp-files { font-size: 11.5px; margin-top: 4px; }
+.cp-files a { color: #1a3a6b; text-decoration: none; }
+.cp-files a:hover { text-decoration: underline; }
 .cp-empty { color: #aaa; font-size: 12.5px; padding: 10px 4px; }
+/* Догруженные фото в карточке работы */
+.cl-extra { margin-top: 4px; font-size: 11.5px; }
+.cl-extra a { color: #1a3a6b; margin-right: 10px; text-decoration: none; }
+.cl-extra a:hover { text-decoration: underline; }
 body.chk-open .board-wrap { margin-right: 324px; }
 
 /* ── EMPTY ── */
@@ -401,6 +413,7 @@ body.chk-open .board-wrap { margin-right: 324px; }
   <div id="chk-panel-hint">Клик по чек-листу — подсветить его этажи на шахматке</div>
   <div id="chk-panel-list"></div>
 </div>
+<input type="file" id="cp-photo-inp" accept="image/*,.pdf" multiple style="display:none">
 
 <!-- LOADER -->
 <div id="loader"><div id="loader-box">Загрузка данных…</div></div>
@@ -566,10 +579,14 @@ window.onload = function () {
     IS_ADMIN = true;
     setAuthBtn(true);
   }
-  // Панель чек-листов: клик по элементу — подсветка, по 🗑 — удаление
+  // Панель чек-листов: клик по элементу — подсветка, по 🗑 — удаление, по 📷 — догрузка фото
   document.getElementById('chk-panel-list').onclick = function (ev) {
     var del = ev.target.closest ? ev.target.closest('[data-del]') : null;
     if (del) { requestDeleteChecklist(del.dataset.del, del.dataset.num); return; }
+    var ph = ev.target.closest ? ev.target.closest('[data-photo]') : null;
+    if (ph) { requestAddPhotos(ph.dataset.photo); return; }
+    // Клики по селекту статуса и ссылкам на файлы не должны переключать подсветку
+    if (ev.target.closest && ev.target.closest('select, a')) return;
     var item = ev.target.closest ? ev.target.closest('.cp-item') : null;
     if (!item) return;
     SEL_CHK = (String(SEL_CHK) === String(item.dataset.id)) ? null : item.dataset.id;
@@ -579,6 +596,7 @@ window.onload = function () {
       if (c && c.scrollIntoView) c.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
     }
   };
+  document.getElementById('cp-photo-inp').onchange = function () { uploadChecklistPhotos(this.files); };
   window.addEventListener('resize', function () { if (CHECK_MODE) positionChkPanel(); });
   loadData();
 };
@@ -1055,6 +1073,7 @@ function collectChecklists(cols) {
           id: r.id, number: r.number || '', akt: r.akt || '',
           status: r.status || '', date: r.date || '',
           corpus: p[1], source: r.source, floors: {},
+          extra: r.extra || [],
         };
         order.push(g);
       }
@@ -1084,15 +1103,30 @@ function renderChkPanel(cols) {
   box.innerHTML = list.map(function (g) {
     var num = g.number ? '№ ' + g.number : (g.akt ? 'Акт ' + g.akt : 'Без номера');
     var fl = Object.keys(g.floors).sort(function (a, b) { return parseFloat(a) - parseFloat(b); });
-    var del = g.source === 'internal'
+    var isInt = g.source === 'internal';
+    // Внутренние чек-листы админ правит на месте: селект статуса + догрузка фото + удаление
+    var statusHtml = (isInt && IS_ADMIN)
+      ? statusSelect(g.status, g.id)
+      : '<span class="cl-status' + statusClass(g.status) + '">' + e(g.status || '—') + '</span>';
+    var photo = isInt
+      ? '<button class="cp-photo" data-photo="' + e(g.id) + '" title="Догрузить фотографии">📷</button>'
+      : '';
+    var del = isInt
       ? '<button class="cp-del" data-del="' + e(g.id) + '" data-num="' + e(g.number) + '" title="Удалить чек-лист">🗑</button>'
       : '';
+    var files = '';
+    if (g.extra && g.extra.length) {
+      files = '<div class="cp-files">📎 ' + g.extra.map(function (f, i) {
+        return '<a href="' + e(f.u) + '" target="_blank" rel="noopener" title="' + e(f.n || '') + '">фото ' + (i + 1) + '</a>';
+      }).join(' · ') + '</div>';
+    }
     var sel = String(SEL_CHK) === String(g.id) ? ' sel' : '';
     return '<div class="cp-item' + sel + '" data-id="' + e(g.id) + '">' +
              '<div class="cp-top"><span class="cp-num">' + e(num) + '</span>' +
-             '<span class="cl-status' + statusClass(g.status) + '">' + e(g.status || '—') + '</span>' + del + '</div>' +
+             statusHtml + photo + del + '</div>' +
              '<div class="cp-loc">' + e(g.corpus) + ' · эт. ' + e(fl.join(', ')) +
              (g.date ? ' · ' + e(g.date) : '') + '</div>' +
+             files +
            '</div>';
   }).join('');
 }
@@ -1140,6 +1174,79 @@ function requestDeleteChecklist(id, num) {
       setSt('err', 'ошибка');
       toast('Ошибка удаления: ' + err.message, 'err', 6000);
     });
+}
+
+// ─── Догрузка фотографий к чек-листу ─────────────────────────────────────────
+var PHOTO_CHK = null; // id чек-листа, к которому догружаем фото
+
+function requestAddPhotos(id) {
+  if (!IS_ADMIN) { openPwd(function () { requestAddPhotos(id); }); return; }
+  PHOTO_CHK = id;
+  var inp = document.getElementById('cp-photo-inp');
+  inp.value = '';
+  inp.click();
+}
+
+// Файлы шлём по одному (последовательно) — большие фото в одном запросе не пролезут
+function uploadChecklistPhotos(fileList) {
+  var files = Array.prototype.slice.call(fileList || []);
+  if (!files.length || !PHOTO_CHK) return;
+  var id = PHOTO_CHK;
+
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    var okType = (f.type && f.type.indexOf('image/') === 0) || /\.(png|jpe?g|webp|heic|pdf)$/i.test(f.name);
+    if (!okType) { toast('Только фото или PDF: ' + f.name, 'err', 5000); return; }
+    if (f.size > 25 * 1024 * 1024) { toast('Файл больше 25 МБ: ' + f.name, 'err', 5000); return; }
+  }
+
+  var done = 0;
+  function next() {
+    if (done >= files.length) {
+      setSt('ok', 'сохранено');
+      toast('Добавлено файлов: ' + done, 'ok');
+      render();
+      return;
+    }
+    var f = files[done];
+    setSt('spin', 'фото ' + (done + 1) + '/' + files.length + '…');
+    var reader = new FileReader();
+    reader.onload = function () {
+      var b64 = String(reader.result).split(',')[1] || '';
+      fetch(BASE, { method: 'POST', body: JSON.stringify({
+        action: 'addChecklistFile', id: id,
+        fileName: f.name, mimeType: f.type || 'application/octet-stream', fileData: b64,
+      }) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
+          addLocalChecklistFile(id, d.name, d.url);
+          done++;
+          next();
+        })
+        .catch(fail);
+    };
+    reader.onerror = function () { fail(new Error('Не удалось прочитать файл')); };
+    reader.readAsDataURL(f);
+  }
+  function fail(err) {
+    setSt('err', 'ошибка');
+    toast('Ошибка загрузки файла «' + files[done].name + '»: ' + err.message, 'err', 6000);
+    if (done > 0) render(); // уже загруженные — показать
+  }
+  next();
+}
+
+// Локально дописать файл во все записи группы (чтобы панель/карточка обновились без reload)
+function addLocalChecklistFile(id, name, url) {
+  for (var k in CHECK_BY_CELL) {
+    CHECK_BY_CELL[k].forEach(function (r) {
+      if (String(r.id) === String(id)) {
+        if (!r.extra) r.extra = [];
+        r.extra.push({ n: name, u: url });
+      }
+    });
+  }
 }
 
 // Убрать чек-лист из локальных данных (после удаления на сервере)
@@ -1214,9 +1321,16 @@ function openWorkCard(corpus, pod, floorNum, workId) {
         var link = c.link
           ? '<a class="cl-link" href="' + e(c.link) + '" target="_blank" rel="noopener">Открыть ↗</a>'
           : '<span class="cl-nolink">нет ссылки</span>';
+        // Догруженные фотографии (столбец K «Доп файлы»)
+        var extra = '';
+        if (c.extra && c.extra.length) {
+          extra = '<div class="cl-extra">' + c.extra.map(function (fx, i) {
+            return '<a href="' + e(fx.u) + '" target="_blank" rel="noopener" title="' + e(fx.n || '') + '">📷 фото ' + (i + 1) + '</a>';
+          }).join('') + '</div>';
+        }
         return '<div class="cl-item">' +
                  statusHtml +
-                 '<div class="cl-info">' + e(info.join(' · ')) + src + '</div>' +
+                 '<div class="cl-info">' + e(info.join(' · ')) + src + extra + '</div>' +
                  link +
                '</div>';
       }).join('');
@@ -1259,6 +1373,7 @@ function changeChecklistStatus(sel) {
       sel.dataset.prev = status;
       sel.className = 'cl-status-sel' + statusClass(status);
       sel.disabled = false;
+      render(); // обновить окантовку ячеек и панель чек-листов
     })
     .catch(function (err) {
       sel.value = prev; // откат
