@@ -85,8 +85,8 @@ function doPost(e) {
     if (body.action === 'addChecklistFile') {
       return jsonOut(addInternalChecklistFile(body));
     }
-    if (body.action === 'editChecklistFloors') {
-      return jsonOut(editInternalChecklistFloors(body));
+    if (body.action === 'editChecklistCells') {
+      return jsonOut(editInternalChecklistCells(body));
     }
     return jsonOut({ error: 'Unknown action' });
   } catch (err) {
@@ -557,16 +557,16 @@ function addInternalChecklistFile(body) {
   return { ok: true, name: file.getName(), url: file.getUrl(), files: list.length };
 }
 
-// Правка этажей чек-листа. body: { id, floors:[числа], user }
-// Строки НЕ удаляются (правило безопасности): убранный этаж — его строки помечаются
-// статусом «Удалён»; добавленный этаж — новые строки (по одной на каждую работу группы)
-// с копией полей из существующей строки.
-function editInternalChecklistFloors(body) {
-  var id     = String(body.id   || '').trim();
-  var user   = String(body.user || '').trim();
-  var floors = body.floors || [];
-  if (!id)            throw new Error('Не указан ID чек-листа');
-  if (!floors.length) throw new Error('Нужен хотя бы один этаж');
+// Правка состава чек-листа. body: { id, cells:[{workId,floor}], user }
+// cells — полный новый набор ячеек (работа+этаж) группы, минимум одна.
+// Строки НЕ удаляются (правило безопасности): убранная ячейка — её строка помечается
+// статусом «Удалён»; добавленная — новая строка с копией полей из существующей.
+function editInternalChecklistCells(body) {
+  var id    = String(body.id   || '').trim();
+  var user  = String(body.user || '').trim();
+  var cells = body.cells || [];
+  if (!id)           throw new Error('Не указан ID чек-листа');
+  if (!cells.length) throw new Error('Нужна хотя бы одна ячейка');
 
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CHK_INT_SHEET);
@@ -576,44 +576,47 @@ function editInternalChecklistFloors(body) {
   var n    = sheet.getLastRow() - 1;
   var vals = sheet.getRange(2, 1, n, 13).getValues(); // A–M
 
+  // Новый набор: ключ «работа + этаж»
   var want = {};
-  floors.forEach(function (f) { want[floorNorm(f)] = true; });
+  cells.forEach(function (c) {
+    want[String(c.workId).trim() + '\x00' + floorNorm(c.floor)] = c;
+  });
 
   // Активные строки группы (без «мягко» удалённых)
-  var active = [], workSet = {}, have = {}, tpl = null;
+  var active = [], have = {}, tpl = null;
   for (var i = 0; i < n; i++) {
     if (String(vals[i][0]).trim() !== id) continue;
     if (String(vals[i][5]).trim() === 'Удалён') continue;
     active.push(i);
     if (!tpl) tpl = vals[i];
-    workSet[String(vals[i][3]).trim()] = true;
-    have[floorNorm(vals[i][4])] = true;
+    have[String(vals[i][3]).trim() + '\x00' + floorNorm(vals[i][4])] = true;
   }
   if (!active.length) throw new Error('Чек-лист не найден: ' + id);
 
-  var mark = changeMark_(user, 'этажи изменены');
+  var mark = changeMark_(user, 'состав изменён');
 
-  // Убранные этажи — пометить строки «Удалён»
+  // Убранные ячейки — пометить строки «Удалён»
   var removed = 0;
   active.forEach(function (i) {
-    if (!want[floorNorm(vals[i][4])]) {
+    var key = String(vals[i][3]).trim() + '\x00' + floorNorm(vals[i][4]);
+    if (!want[key]) {
       sheet.getRange(i + 2, 6).setValue('Удалён');
       sheet.getRange(i + 2, 13).setValue(mark);
       removed++;
     }
   });
 
-  // Добавленные этажи — новые строки: каждая работа группы × новый этаж
-  var workIds = Object.keys(workSet);
+  // Добавленные ячейки — новые строки с копией полей группы
   var newRows = [];
-  for (var fl in want) {
-    if (have[fl]) continue;
-    var flVal = isNaN(parseFloat(fl)) ? fl : parseFloat(fl);
-    workIds.forEach(function (w) {
-      // A id · B дата · C корпус · D работа · E этаж · F статус · G ссылка · H файл ·
-      // I комментарий · J номер · K доп файлы · L загрузил · M изменено
-      newRows.push([id, tpl[1], tpl[2], w, flVal, tpl[5], tpl[6], tpl[7], tpl[8], tpl[9], tpl[10], tpl[11], mark]);
-    });
+  for (var key in want) {
+    if (have[key]) continue;
+    var c = want[key];
+    var flVal = parseFloat(c.floor);
+    if (isNaN(flVal)) flVal = c.floor;
+    // A id · B дата · C корпус · D работа · E этаж · F статус · G ссылка · H файл ·
+    // I комментарий · J номер · K доп файлы · L загрузил · M изменено
+    newRows.push([id, tpl[1], tpl[2], String(c.workId).trim(), flVal,
+                  tpl[5], tpl[6], tpl[7], tpl[8], tpl[9], tpl[10], tpl[11], mark]);
   }
   if (newRows.length) {
     sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 13).setValues(newRows);

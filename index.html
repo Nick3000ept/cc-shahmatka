@@ -211,35 +211,6 @@ body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
 }
 .ph-empty { grid-column: 1 / -1; color: #aaa; font-size: 13px; padding: 8px 0; }
 #ph-foot { padding: 12px 20px; border-top: 1px solid #eee; display: flex; gap: 8px; justify-content: flex-end; }
-
-/* ── EDIT FLOORS MODAL (правка этажей чек-листа) ── */
-#ed-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,.5);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 575; padding: 16px;
-}
-#ed-overlay.hide { display: none; }
-#ed-box {
-  background: #fff; border-radius: 12px; width: 420px; max-width: 100%;
-  max-height: 85vh; display: flex; flex-direction: column;
-  box-shadow: 0 12px 40px rgba(0,0,0,.22); overflow: hidden;
-}
-#ed-head { background: #1a3a6b; color: #fff; padding: 14px 20px; display: flex; align-items: center; }
-#ed-head h3 { font-size: 16px; font-weight: 700; }
-#ed-x { margin-left: auto; background: none; border: none; color: #fff; font-size: 20px; cursor: pointer; }
-#ed-hint { padding: 8px 20px; font-size: 12px; color: #888; border-bottom: 1px solid #eee; }
-#ed-body {
-  padding: 14px 20px; overflow-y: auto;
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
-}
-.ed-fl {
-  border: 1px solid #e4e8f0; border-radius: 6px; padding: 5px 4px;
-  font-size: 13px; display: flex; gap: 5px; align-items: center;
-  justify-content: center; cursor: pointer; user-select: none;
-}
-.ed-fl:hover { border-color: #99b3e6; background: #f7faff; }
-#ed-foot { padding: 12px 20px; border-top: 1px solid #eee; display: flex; gap: 8px; justify-content: flex-end; }
-#ed-save[disabled] { opacity: .6; cursor: default; }
 body.chk-open .board-wrap { margin-right: 324px; }
 
 /* ── EMPTY ── */
@@ -478,22 +449,6 @@ body.chk-open .board-wrap { margin-right: 324px; }
 </div>
 <input type="file" id="cp-photo-inp" accept="image/*,.pdf" multiple style="display:none">
 
-<!-- EDIT FLOORS MODAL (правка этажей чек-листа) -->
-<div id="ed-overlay" class="hide" onclick="if(event.target===this)closeEdit()">
-  <div id="ed-box">
-    <div id="ed-head">
-      <h3 id="ed-title">Этажи чек-листа</h3>
-      <button id="ed-x" onclick="closeEdit()">✕</button>
-    </div>
-    <div id="ed-hint">Отметьте этажи, входящие в чек-лист</div>
-    <div id="ed-body"></div>
-    <div id="ed-foot">
-      <button class="btn" onclick="closeEdit()">Отмена</button>
-      <button class="btn btn-pri" id="ed-save" onclick="saveEditFloors()">Сохранить</button>
-    </div>
-  </div>
-</div>
-
 <!-- PHOTO MODAL (фотографии чек-листа) -->
 <div id="ph-overlay" class="hide" onclick="if(event.target===this)closePhotos()">
   <div id="ph-box">
@@ -555,7 +510,7 @@ body.chk-open .board-wrap { margin-right: 324px; }
 <!-- ADD-MODE ACTION BAR (выделение ячеек) -->
 <div id="addbar" class="hide">
   <span id="addbar-info">Выберите ячейки одного корпуса</span>
-  <button class="btn btn-pri" id="addbar-up" onclick="openUpload()">Загрузить чек-лист</button>
+  <button class="btn btn-pri" id="addbar-up" onclick="addbarPrimary()">Загрузить чек-лист</button>
   <button class="btn" onclick="cancelAdd()">Отмена</button>
 </div>
 
@@ -647,6 +602,7 @@ var SEL_CHK    = null;  // id чек-листа, выбранного в пра�
 var CHECKS_LOADED = false; // чек-листы (checkByCell) подгружены фоном
 var STATUS_LIST = ['Принято', 'Есть замечания', 'Замечания устранены']; // статусы чек-листа
 var ADD_MODE   = false; // режим выделения ячеек для нового чек-листа
+var EDIT_CHK   = null;  // id чек-листа, состав которого правим (режим выделения)
 var SELECTED   = {};    // key → {workId, corpus, floor, nameGrid}
 var ADD_CORPUS = '';    // корпус текущего выделения (мультивыбор в пределах 1 корпуса)
 
@@ -1345,101 +1301,104 @@ function renderPhotoModal() {
   }).join('');
 }
 
-// ─── Правка этажей чек-листа ─────────────────────────────────────────────────
-var ED_CHK = null; // id чек-листа, открытого в модалке правки этажей
-
+// ─── Правка состава чек-листа (выделение ячеек, как при создании) ───────────
+// ✏️ включает режим выделения: текущие ячейки чек-листа уже отмечены, кликами
+// добавляем/убираем, «Сохранить» шлёт новый состав. Файл/статус/№/дата/фото — без изменений.
 function requestEditChecklist(id) {
   if (!IS_ADMIN) { openPwd(function () { requestEditChecklist(id); }); return; }
   var info = chkCells(id);
   if (!info) { toast('Чек-лист не найден', 'err'); return; }
-  ED_CHK = id;
-  document.getElementById('ed-title').textContent =
-    'Этажи чек-листа' + (info.rec.number ? ' № ' + info.rec.number : '') + ' · ' + info.corpus;
-  // Доступные этажи — все этажи корпуса из реестра
-  var avail = {};
-  FLOORS.forEach(function (f) { if (f.corpus === info.corpus) avail[f.floor] = true; });
-  var floors = Object.keys(avail).map(Number).sort(function (a, b) { return b - a; });
-  document.getElementById('ed-body').innerHTML = floors.map(function (f) {
-    var chk = info.floors[String(f)] ? ' checked' : '';
-    return '<label class="ed-fl"><input type="checkbox" value="' + f + '"' + chk + '> ' + f + '</label>';
-  }).join('');
-  var sv = document.getElementById('ed-save');
-  sv.disabled = false; sv.textContent = 'Сохранить';
-  document.getElementById('ed-overlay').classList.remove('hide');
+  if (ADD_MODE) cancelAdd(); // выйти из предыдущего выделения
+
+  EDIT_CHK = id;
+  ADD_MODE = true;
+  CHECK_MODE = true; document.getElementById('chk-mode').checked = true;
+  updateChkPanel();
+  ADD_CORPUS = info.corpus;
+  SELECTED = {};
+  info.cells.forEach(function (c) {
+    var w = WORKS_MAP[c.workId] || {};
+    SELECTED[selKey(c.workId, info.corpus, c.floor)] = {
+      workId: c.workId, corpus: info.corpus, floor: c.floor,
+      nameGrid: w.nameGrid || w.work || c.workId,
+    };
+  });
+  document.body.classList.add('add-mode');
+  document.getElementById('add-chk-btn').classList.add('on');
+  document.getElementById('addbar').classList.remove('hide');
+  updateAddbar();
+  render();
+  toast('Кликайте по ячейкам, чтобы изменить состав, затем «Сохранить»', 'inf', 5000);
 }
 
-// Состав группы чек-листа: корпус, этажи, работы, первая запись
+// Состав группы чек-листа: корпус, список ячеек (работа+этаж), первая запись
 function chkCells(id) {
-  var corpus = '', floors = {}, workIds = {}, rec = null;
+  var corpus = '', cells = [], rec = null;
   for (var k in CHECK_BY_CELL) {
     var recs = CHECK_BY_CELL[k];
     for (var i = 0; i < recs.length; i++) {
       if (String(recs[i].id) !== String(id)) continue;
       var p = k.split('\x00');
-      corpus = p[1]; floors[p[2]] = true; workIds[p[0]] = true;
+      corpus = p[1];
+      cells.push({ workId: p[0], floor: parseFloat(p[2]) });
       if (!rec) rec = recs[i];
       break;
     }
   }
-  return rec ? { corpus: corpus, floors: floors, workIds: workIds, rec: rec } : null;
+  return rec ? { corpus: corpus, cells: cells, rec: rec } : null;
 }
 
-function closeEdit() {
-  ED_CHK = null;
-  document.getElementById('ed-overlay').classList.add('hide');
+// Кнопка на нижней панели: в режиме правки — сохранить состав, иначе — загрузка нового
+function addbarPrimary() {
+  if (EDIT_CHK) saveEditCells();
+  else openUpload();
 }
 
-function saveEditFloors() {
-  if (!ED_CHK) return;
-  var id = ED_CHK;
-  var boxes  = document.querySelectorAll('#ed-body input:checked');
-  var floors = Array.prototype.slice.call(boxes).map(function (b) { return parseFloat(b.value); });
-  if (!floors.length) { toast('Отметьте хотя бы один этаж', 'err'); return; }
-  var sv = document.getElementById('ed-save');
-  sv.disabled = true; sv.textContent = 'Сохранение…';
+function saveEditCells() {
+  var keys = Object.keys(SELECTED);
+  if (!keys.length) { toast('Выберите хотя бы одну ячейку', 'err'); return; }
+  var id     = EDIT_CHK;
+  var corpus = ADD_CORPUS;
+  var cells  = keys.map(function (k) {
+    return { workId: SELECTED[k].workId, floor: SELECTED[k].floor };
+  });
+  var btn = document.getElementById('addbar-up');
+  btn.disabled = true; btn.textContent = 'Сохранение…';
   setSt('spin', '…');
-  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'editChecklistFloors', id: id, floors: floors, user: getUserName() }) })
+  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'editChecklistCells', id: id, cells: cells, user: getUserName() }) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
-      applyLocalFloors(id, floors);
+      applyLocalCells(id, corpus, cells);
       setSt('ok', 'сохранено');
-      toast('Этажи обновлены (добавлено ' + d.added + ', убрано ' + d.removed + ')', 'ok');
-      closeEdit();
-      render();
+      toast('Чек-лист обновлён (добавлено ' + d.added + ', убрано ' + d.removed + ')', 'ok');
+      cancelAdd();
     })
     .catch(function (err) {
-      sv.disabled = false; sv.textContent = 'Сохранить';
+      btn.disabled = false; btn.textContent = 'Сохранить';
       setSt('err', 'ошибка');
       toast('Ошибка: ' + err.message, 'err', 6000);
     });
 }
 
-// Локально перестроить записи группы под новый набор этажей (без перезагрузки)
-function applyLocalFloors(id, floors) {
-  var info = chkCells(id);
-  if (!info) return;
-  var want = {};
-  floors.forEach(function (f) { want[String(f)] = true; });
-  // Убрать записи с этажей, которых больше нет
+// Локально перенести записи группы на новый состав ячеек (без перезагрузки)
+function applyLocalCells(id, corpus, cells) {
+  var rec = chkGroupInfo(id);
+  if (!rec) return;
+  // Убрать все записи группы
   for (var k in CHECK_BY_CELL) {
-    var p = k.split('\x00');
-    if (p[1] !== info.corpus || want[p[2]]) continue;
     var left = CHECK_BY_CELL[k].filter(function (r) { return String(r.id) !== String(id); });
     if (left.length) CHECK_BY_CELL[k] = left;
     else delete CHECK_BY_CELL[k];
   }
-  // Добавить записи на новые этажи — по каждой работе группы
-  for (var fl in want) {
-    if (info.floors[fl]) continue;
-    for (var w in info.workIds) {
-      var key  = w + '\x00' + info.corpus + '\x00' + fl;
-      var recs = CHECK_BY_CELL[key] = CHECK_BY_CELL[key] || [];
-      var copy = {};
-      for (var prop in info.rec) copy[prop] = info.rec[prop];
-      recs.push(copy);
-    }
-  }
+  // Добавить на новые места
+  cells.forEach(function (c) {
+    var key  = c.workId + '\x00' + corpus + '\x00' + String(parseFloat(c.floor));
+    var recs = CHECK_BY_CELL[key] = CHECK_BY_CELL[key] || [];
+    var copy = {};
+    for (var prop in rec) copy[prop] = rec[prop];
+    recs.push(copy);
+  });
 }
 
 // ─── Догрузка фотографий к чек-листу ─────────────────────────────────────────
@@ -1685,7 +1644,7 @@ function toggleAddMode() {
 }
 
 function cancelAdd() {
-  ADD_MODE = false; SELECTED = {}; ADD_CORPUS = '';
+  ADD_MODE = false; EDIT_CHK = null; SELECTED = {}; ADD_CORPUS = '';
   document.body.classList.remove('add-mode');
   document.getElementById('add-chk-btn').classList.remove('on');
   document.getElementById('addbar').classList.add('hide');
@@ -1697,7 +1656,8 @@ function toggleSelect(td) {
   var floor  = parseFloat(td.dataset.floor);
   var workId = td.dataset.work;
 
-  if (!Object.keys(SELECTED).length) ADD_CORPUS = corpus;
+  // При правке существующего чек-листа корпус зафиксирован
+  if (!EDIT_CHK && !Object.keys(SELECTED).length) ADD_CORPUS = corpus;
   else if (corpus !== ADD_CORPUS) {
     toast('Чек-лист оформляется в пределах одного корпуса (' + ADD_CORPUS + ')', 'err');
     return;
@@ -1712,15 +1672,24 @@ function toggleSelect(td) {
     SELECTED[key] = { workId: workId, corpus: corpus, floor: floor, nameGrid: w.nameGrid || w.work || workId };
     td.classList.add('c-sel');
   }
-  if (!Object.keys(SELECTED).length) ADD_CORPUS = '';
+  if (!EDIT_CHK && !Object.keys(SELECTED).length) ADD_CORPUS = '';
   updateAddbar();
 }
 
 function updateAddbar() {
-  var n = Object.keys(SELECTED).length;
-  document.getElementById('addbar-info').textContent =
-    n ? ('Корпус ' + ADD_CORPUS + ' · выбрано ячеек: ' + n) : 'Выберите ячейки одного корпуса';
-  document.getElementById('addbar-up').disabled = !n;
+  var n    = Object.keys(SELECTED).length;
+  var info = document.getElementById('addbar-info');
+  var btn  = document.getElementById('addbar-up');
+  if (EDIT_CHK) {
+    var rec = chkGroupInfo(EDIT_CHK);
+    var num = (rec && rec.number) ? ' № ' + rec.number : '';
+    info.textContent = 'Правка чек-листа' + num + ' · корпус ' + ADD_CORPUS + ' · ячеек: ' + n;
+    btn.textContent = 'Сохранить';
+  } else {
+    info.textContent = n ? ('Корпус ' + ADD_CORPUS + ' · выбрано ячеек: ' + n) : 'Выберите ячейки одного корпуса';
+    btn.textContent = 'Загрузить чек-лист';
+  }
+  btn.disabled = !n;
 }
 
 function openUpload() {
