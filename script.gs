@@ -52,6 +52,7 @@ function doGet(e) {
     if (action === 'ping')          return ContentService.createTextOutput('OK').setMimeType(ContentService.MimeType.TEXT);
     if (action === 'checkPassword') return jsonOut({ ok: p.pwd === ADMIN_PASSWORD });
     if (action === 'clearCache')    { clearCache(); return jsonOut({ ok: true }); }
+    if (action === 'migrateInt')    return jsonOut(migrateInternalSheet());
     if (action === 'saveCell') {
       saveCellFact(p.workId, p.floorId, p.undo === 'true');
       return jsonOut({ ok: true });
@@ -306,14 +307,15 @@ function readChecklists(ss) {
 
 // Внутренние чек-листы (лист «Чек листы_внутренние»): прямой ID_работы + корпус + этаж.
 // Дописываем в тот же checkByCell, что и внешние.
-// Колонки: A ID  B Дата  C Корпус  D ID_работы  E Этаж  F Статус  G Ссылка  H Файл  I Комментарий  J Номер
-//          K Доп файлы (JSON-массив [{n:имя, u:ссылка}] — догруженные фотографии)
-//          L Загрузил (имя из формы)  M Изменено (кто · когда · что — последнее изменение)
+// Колонки: A ID  B Дата  C Корпус  D Система (название)  E Этаж  F Статус  G Ссылка  H Файл
+//          I Комментарий  J Номер  K Доп файлы (JSON [{n,u}] — догруженные фото)
+//          L Загрузил  M Изменено (кто · когда · что)  N ID_работы (ключ)  O Работа (название)
+// Ключ привязки — N; в старых строках (до миграции) ID лежал в D — читаем с запасным вариантом.
 function addInternalChecklists(ss, checkByCell) {
   var sheet = ss.getSheetByName(CHK_INT_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return;
-  sheet.getRange(2, 1, sheet.getLastRow() - 1, 12).getValues().forEach(function (r) {
-    var workId = String(r[3]).trim();
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, 14).getValues().forEach(function (r) {
+    var workId = String(r[13]).trim() || String(r[3]).trim();
     var corpus = String(r[2]).trim();
     if (!workId || !corpus) return;
     if (String(r[5]).trim() === 'Удалён') return; // «мягко» удалённые не отдаём
@@ -423,9 +425,15 @@ function saveInternalChecklist(body) {
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CHK_INT_SHEET) || createInternalSheet(ss);
   ensureIntHeaders_(sheet);
+  var works = worksById_(ss);
   var group = 'IC-' + Date.now();
   var rows  = cells.map(function (c) {
-    return [group, dateStr, corpus, String(c.workId).trim(), c.floor, status, url, fname, comment, number, '', user];
+    var wid = String(c.workId).trim();
+    var w   = works[wid] || {};
+    // A id · B дата · C корпус · D система · E этаж · F статус · G ссылка · H файл ·
+    // I комментарий · J номер · K доп файлы · L загрузил · M изменено · N ID_работы · O работа
+    return [group, dateStr, corpus, w.sistema || '', c.floor, status, url, fname, comment, number,
+            '', user, '', wid, w.nameGrid || w.work || wid];
   });
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
   SpreadsheetApp.flush();
@@ -433,13 +441,23 @@ function saveInternalChecklist(body) {
   return { ok: true, id: group, url: url, rows: rows.length };
 }
 
-// Шапки столбцов J–M (лист мог быть создан старой версией с меньшим числом столбцов)
+// Карта справочника: workId → работа (для названий системы и работы)
+function worksById_(ss) {
+  var map = {};
+  readWorks(ss).forEach(function (w) { map[w.workId] = w; });
+  return map;
+}
+
+// Шапки столбцов (лист мог быть создан старой версией с меньшим числом столбцов).
+// Заполняем только ПУСТЫЕ ячейки шапки — переименованные пользователем не трогаем.
 function ensureIntHeaders_(sheet) {
-  var want = { 10: 'Номер', 11: 'Доп файлы', 12: 'Загрузил', 13: 'Изменено' };
+  var want = {
+    4: 'Система', 10: 'Номер', 11: 'Доп файлы', 12: 'Загрузил',
+    13: 'Изменено', 14: 'ID_работы', 15: 'Работа',
+  };
   for (var col in want) {
-    if (String(sheet.getRange(1, Number(col)).getValue()).trim() !== want[col]) {
-      sheet.getRange(1, Number(col)).setValue(want[col]);
-    }
+    var cell = sheet.getRange(1, Number(col));
+    if (!String(cell.getValue()).trim()) cell.setValue(want[col]);
   }
 }
 
@@ -579,7 +597,7 @@ function editInternalChecklistCells(body) {
   ensureIntHeaders_(sheet);
 
   var n    = sheet.getLastRow() - 1;
-  var vals = sheet.getRange(2, 1, n, 13).getValues(); // A–M
+  var vals = sheet.getRange(2, 1, n, 15).getValues(); // A–O
 
   // Новый набор: ключ «работа + этаж»
   var want = {};
@@ -587,14 +605,15 @@ function editInternalChecklistCells(body) {
     want[String(c.workId).trim() + '\x00' + floorNorm(c.floor)] = c;
   });
 
-  // Активные строки группы (без «мягко» удалённых)
+  // Активные строки группы (без «мягко» удалённых); ID работы — N, в старых строках — D
   var active = [], have = {}, tpl = null;
   for (var i = 0; i < n; i++) {
     if (String(vals[i][0]).trim() !== id) continue;
     if (String(vals[i][5]).trim() === 'Удалён') continue;
     active.push(i);
     if (!tpl) tpl = vals[i];
-    have[String(vals[i][3]).trim() + '\x00' + floorNorm(vals[i][4])] = true;
+    var rowWid = String(vals[i][13]).trim() || String(vals[i][3]).trim();
+    have[rowWid + '\x00' + floorNorm(vals[i][4])] = true;
   }
   if (!active.length) throw new Error('Чек-лист не найден: ' + id);
 
@@ -612,7 +631,8 @@ function editInternalChecklistCells(body) {
   // Убранные ячейки — пометить «Удалён»; остающиеся — обновить дату/№/комментарий
   var removed = 0;
   active.forEach(function (i) {
-    var key = String(vals[i][3]).trim() + '\x00' + floorNorm(vals[i][4]);
+    var rowWid = String(vals[i][13]).trim() || String(vals[i][3]).trim();
+    var key = rowWid + '\x00' + floorNorm(vals[i][4]);
     if (!want[key]) {
       sheet.getRange(i + 2, 6).setValue('Удалён');
       sheet.getRange(i + 2, 13).setValue(mark);
@@ -626,19 +646,23 @@ function editInternalChecklistCells(body) {
   });
 
   // Добавленные ячейки — новые строки с копией полей группы (и новыми датой/№/комментарием)
+  var works   = worksById_(ss);
   var newRows = [];
   for (var key in want) {
     if (have[key]) continue;
     var c = want[key];
     var flVal = parseFloat(c.floor);
     if (isNaN(flVal)) flVal = c.floor;
-    // A id · B дата · C корпус · D работа · E этаж · F статус · G ссылка · H файл ·
-    // I комментарий · J номер · K доп файлы · L загрузил · M изменено
-    newRows.push([id, newDate, tpl[2], String(c.workId).trim(), flVal,
-                  tpl[5], tpl[6], tpl[7], newComm, newNum, tpl[10], tpl[11], mark]);
+    var wid = String(c.workId).trim();
+    var w   = works[wid] || {};
+    // A id · B дата · C корпус · D система · E этаж · F статус · G ссылка · H файл ·
+    // I комментарий · J номер · K доп файлы · L загрузил · M изменено · N ID_работы · O работа
+    newRows.push([id, newDate, tpl[2], w.sistema || '', flVal,
+                  tpl[5], tpl[6], tpl[7], newComm, newNum, tpl[10], tpl[11], mark,
+                  wid, w.nameGrid || w.work || wid]);
   }
   if (newRows.length) {
-    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 13).setValues(newRows);
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 15).setValues(newRows);
   }
   SpreadsheetApp.flush();
   return { ok: true, added: newRows.length, removed: removed };
@@ -675,12 +699,45 @@ function deleteInternalChecklist(body) {
 
 function createInternalSheet(ss) {
   var sh = ss.insertSheet(CHK_INT_SHEET);
-  sh.getRange(1, 1, 1, 13).setValues([[
-    'ID', 'Дата', 'Корпус', 'ID_работы', 'Этаж', 'Статус', 'Ссылка', 'Файл', 'Комментарий', 'Номер',
-    'Доп файлы', 'Загрузил', 'Изменено'
+  sh.getRange(1, 1, 1, 15).setValues([[
+    'ID', 'Дата', 'Корпус', 'Система', 'Этаж', 'Статус', 'Ссылка', 'Файл', 'Комментарий', 'Номер',
+    'Доп файлы', 'Загрузил', 'Изменено', 'ID_работы', 'Работа'
   ]]);
   sh.setFrozenRows(1);
   return sh;
+}
+
+// Разовая миграция листа «Чек листы_внутренние» (GET ?action=migrateInt, идемпотентна):
+// в старых строках ID работы лежал в D — переносим его в N, в D пишем название системы,
+// в O — название работы (по справочнику). Строки, где N уже заполнен, не трогаем.
+function migrateInternalSheet() {
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CHK_INT_SHEET);
+  if (!sheet) return { ok: true, migrated: 0 };
+  ensureIntHeaders_(sheet);
+  var n = sheet.getLastRow() - 1;
+  if (n < 1) return { ok: true, migrated: 0 };
+
+  var works = worksById_(ss);
+  var dCol = sheet.getRange(2, 4,  n, 1).getValues();
+  var nCol = sheet.getRange(2, 14, n, 1).getValues();
+  var oCol = sheet.getRange(2, 15, n, 1).getValues();
+  var migrated = 0;
+  for (var i = 0; i < n; i++) {
+    if (String(nCol[i][0]).trim()) continue;      // уже мигрирована
+    var d = String(dCol[i][0]).trim();
+    var w = works[d];
+    if (!w) continue;                             // в D не ID работы — не трогаем
+    nCol[i][0] = d;
+    dCol[i][0] = w.sistema || '';
+    oCol[i][0] = w.nameGrid || w.work || d;
+    migrated++;
+  }
+  sheet.getRange(2, 4,  n, 1).setValues(dCol);
+  sheet.getRange(2, 14, n, 1).setValues(nCol);
+  sheet.getRange(2, 15, n, 1).setValues(oCol);
+  SpreadsheetApp.flush();
+  return { ok: true, migrated: migrated };
 }
 
 // Дата из формы (YYYY-MM-DD) → dd.MM.yyyy; пусто → сегодня
