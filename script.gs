@@ -85,6 +85,9 @@ function doPost(e) {
     if (body.action === 'addChecklistFile') {
       return jsonOut(addInternalChecklistFile(body));
     }
+    if (body.action === 'editChecklistFloors') {
+      return jsonOut(editInternalChecklistFloors(body));
+    }
     return jsonOut({ error: 'Unknown action' });
   } catch (err) {
     return jsonOut({ error: err.toString() });
@@ -512,6 +515,7 @@ function addInternalChecklistFile(body) {
   var rowsIdx = [], floorsSet = {}, corpus = '', number = '';
   for (var i = 0; i < n; i++) {
     if (String(vals[i][0]).trim() !== id) continue;
+    if (String(vals[i][5]).trim() === 'Удалён') continue; // убранные этажи не учитываем
     rowsIdx.push(i + 2);
     if (!corpus) corpus = String(vals[i][2]).trim();
     if (!number) number = String(vals[i][9]).trim();
@@ -551,6 +555,71 @@ function addInternalChecklistFile(body) {
   });
   SpreadsheetApp.flush();
   return { ok: true, name: file.getName(), url: file.getUrl(), files: list.length };
+}
+
+// Правка этажей чек-листа. body: { id, floors:[числа], user }
+// Строки НЕ удаляются (правило безопасности): убранный этаж — его строки помечаются
+// статусом «Удалён»; добавленный этаж — новые строки (по одной на каждую работу группы)
+// с копией полей из существующей строки.
+function editInternalChecklistFloors(body) {
+  var id     = String(body.id   || '').trim();
+  var user   = String(body.user || '').trim();
+  var floors = body.floors || [];
+  if (!id)            throw new Error('Не указан ID чек-листа');
+  if (!floors.length) throw new Error('Нужен хотя бы один этаж');
+
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CHK_INT_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) throw new Error('Лист «Чек листы_внутренние» пуст');
+  ensureIntHeaders_(sheet);
+
+  var n    = sheet.getLastRow() - 1;
+  var vals = sheet.getRange(2, 1, n, 13).getValues(); // A–M
+
+  var want = {};
+  floors.forEach(function (f) { want[floorNorm(f)] = true; });
+
+  // Активные строки группы (без «мягко» удалённых)
+  var active = [], workSet = {}, have = {}, tpl = null;
+  for (var i = 0; i < n; i++) {
+    if (String(vals[i][0]).trim() !== id) continue;
+    if (String(vals[i][5]).trim() === 'Удалён') continue;
+    active.push(i);
+    if (!tpl) tpl = vals[i];
+    workSet[String(vals[i][3]).trim()] = true;
+    have[floorNorm(vals[i][4])] = true;
+  }
+  if (!active.length) throw new Error('Чек-лист не найден: ' + id);
+
+  var mark = changeMark_(user, 'этажи изменены');
+
+  // Убранные этажи — пометить строки «Удалён»
+  var removed = 0;
+  active.forEach(function (i) {
+    if (!want[floorNorm(vals[i][4])]) {
+      sheet.getRange(i + 2, 6).setValue('Удалён');
+      sheet.getRange(i + 2, 13).setValue(mark);
+      removed++;
+    }
+  });
+
+  // Добавленные этажи — новые строки: каждая работа группы × новый этаж
+  var workIds = Object.keys(workSet);
+  var newRows = [];
+  for (var fl in want) {
+    if (have[fl]) continue;
+    var flVal = isNaN(parseFloat(fl)) ? fl : parseFloat(fl);
+    workIds.forEach(function (w) {
+      // A id · B дата · C корпус · D работа · E этаж · F статус · G ссылка · H файл ·
+      // I комментарий · J номер · K доп файлы · L загрузил · M изменено
+      newRows.push([id, tpl[1], tpl[2], w, flVal, tpl[5], tpl[6], tpl[7], tpl[8], tpl[9], tpl[10], tpl[11], mark]);
+    });
+  }
+  if (newRows.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 13).setValues(newRows);
+  }
+  SpreadsheetApp.flush();
+  return { ok: true, added: newRows.length, removed: removed };
 }
 
 // «Удаление» внутреннего чек-листа. Строки из листа НЕ удаляются (правило безопасности) —

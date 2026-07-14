@@ -165,13 +165,14 @@ body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
   margin-top: 6px; padding-top: 6px; border-top: 1px solid #f0f2f5;
 }
 .cp-actions .cl-status-sel { flex: 1; min-width: 0; max-width: none; }
-.cp-photo, .cp-del {
+.cp-photo, .cp-edit, .cp-del {
   background: #fff; border: 1px solid #ccc; border-radius: 4px;
   cursor: pointer; font-size: 12px; padding: 3px 8px; line-height: 1.2; flex-shrink: 0;
 }
-.cp-photo:hover { background: #f0f4ff; border-color: #99b3e6; }
+.cp-photo:hover, .cp-edit:hover { background: #f0f4ff; border-color: #99b3e6; }
 .cp-del { margin-left: auto; }
 .cp-del:hover { background: #fdecea; border-color: #f5c6c2; }
+.cp-comm { font-size: 11.5px; color: #777; margin-top: 4px; white-space: normal; word-break: break-word; }
 .cp-empty { color: #aaa; font-size: 12.5px; padding: 10px 4px; }
 /* Догруженные фото в карточке работы */
 .cl-extra { margin-top: 4px; font-size: 11.5px; }
@@ -204,8 +205,41 @@ body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
 .ph-item:hover { border-color: #99b3e6; }
 .ph-thumb { width: 100%; height: 110px; object-fit: cover; display: block; background: #f0f2f5; }
 .ph-name { font-size: 11px; padding: 5px 8px; word-break: break-all; }
+.ph-ico {
+  height: 110px; display: flex; align-items: center; justify-content: center;
+  font-size: 34px; background: #f0f2f5;
+}
 .ph-empty { grid-column: 1 / -1; color: #aaa; font-size: 13px; padding: 8px 0; }
 #ph-foot { padding: 12px 20px; border-top: 1px solid #eee; display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ── EDIT FLOORS MODAL (правка этажей чек-листа) ── */
+#ed-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 575; padding: 16px;
+}
+#ed-overlay.hide { display: none; }
+#ed-box {
+  background: #fff; border-radius: 12px; width: 420px; max-width: 100%;
+  max-height: 85vh; display: flex; flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0,0,0,.22); overflow: hidden;
+}
+#ed-head { background: #1a3a6b; color: #fff; padding: 14px 20px; display: flex; align-items: center; }
+#ed-head h3 { font-size: 16px; font-weight: 700; }
+#ed-x { margin-left: auto; background: none; border: none; color: #fff; font-size: 20px; cursor: pointer; }
+#ed-hint { padding: 8px 20px; font-size: 12px; color: #888; border-bottom: 1px solid #eee; }
+#ed-body {
+  padding: 14px 20px; overflow-y: auto;
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+}
+.ed-fl {
+  border: 1px solid #e4e8f0; border-radius: 6px; padding: 5px 4px;
+  font-size: 13px; display: flex; gap: 5px; align-items: center;
+  justify-content: center; cursor: pointer; user-select: none;
+}
+.ed-fl:hover { border-color: #99b3e6; background: #f7faff; }
+#ed-foot { padding: 12px 20px; border-top: 1px solid #eee; display: flex; gap: 8px; justify-content: flex-end; }
+#ed-save[disabled] { opacity: .6; cursor: default; }
 body.chk-open .board-wrap { margin-right: 324px; }
 
 /* ── EMPTY ── */
@@ -444,6 +478,22 @@ body.chk-open .board-wrap { margin-right: 324px; }
 </div>
 <input type="file" id="cp-photo-inp" accept="image/*,.pdf" multiple style="display:none">
 
+<!-- EDIT FLOORS MODAL (правка этажей чек-листа) -->
+<div id="ed-overlay" class="hide" onclick="if(event.target===this)closeEdit()">
+  <div id="ed-box">
+    <div id="ed-head">
+      <h3 id="ed-title">Этажи чек-листа</h3>
+      <button id="ed-x" onclick="closeEdit()">✕</button>
+    </div>
+    <div id="ed-hint">Отметьте этажи, входящие в чек-лист</div>
+    <div id="ed-body"></div>
+    <div id="ed-foot">
+      <button class="btn" onclick="closeEdit()">Отмена</button>
+      <button class="btn btn-pri" id="ed-save" onclick="saveEditFloors()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
 <!-- PHOTO MODAL (фотографии чек-листа) -->
 <div id="ph-overlay" class="hide" onclick="if(event.target===this)closePhotos()">
   <div id="ph-box">
@@ -629,6 +679,8 @@ window.onload = function () {
     if (del) { requestDeleteChecklist(del.dataset.del, del.dataset.num); return; }
     var ph = ev.target.closest ? ev.target.closest('[data-photo]') : null;
     if (ph) { openPhotoModal(ph.dataset.photo); return; }
+    var ed = ev.target.closest ? ev.target.closest('[data-edit]') : null;
+    if (ed) { requestEditChecklist(ed.dataset.edit); return; }
     // Клики по селекту статуса и ссылкам на файлы не должны переключать подсветку
     if (ev.target.closest && ev.target.closest('select, a')) return;
     var item = ev.target.closest ? ev.target.closest('.cp-item') : null;
@@ -1120,7 +1172,7 @@ function collectChecklists(cols) {
           id: r.id, number: r.number || '', akt: r.akt || '',
           status: r.status || '', date: r.date || '',
           corpus: p[1], source: r.source, floors: {},
-          extra: r.extra || [], by: r.by || '',
+          extra: r.extra || [], by: r.by || '', comment: r.comment || '',
         };
         order.push(g);
       }
@@ -1159,8 +1211,14 @@ function renderChkPanel(cols) {
     var photo = isInt
       ? '<button class="cp-photo" data-photo="' + e(g.id) + '" title="Фотографии чек-листа">📷' + (nPhotos ? ' ' + nPhotos : '') + '</button>'
       : '';
+    var edit = isInt
+      ? '<button class="cp-edit" data-edit="' + e(g.id) + '" title="Редактировать этажи чек-листа">✏️</button>'
+      : '';
     var del = isInt
       ? '<button class="cp-del" data-del="' + e(g.id) + '" data-num="' + e(g.number) + '" title="Удалить чек-лист">🗑</button>'
+      : '';
+    var comm = g.comment
+      ? '<div class="cp-comm">💬 ' + e(g.comment) + '</div>'
       : '';
     var sel = String(SEL_CHK) === String(g.id) ? ' sel' : '';
     var tip = g.by ? ' title="Загрузил: ' + e(g.by) + '"' : '';
@@ -1168,7 +1226,8 @@ function renderChkPanel(cols) {
              '<div class="cp-top"><span class="cp-num">' + e(num) + '</span></div>' +
              '<div class="cp-loc">' + e(g.corpus) + ' · эт. ' + e(fl.join(', ')) +
              (g.date ? ' · ' + e(g.date) : '') + '</div>' +
-             '<div class="cp-actions">' + statusHtml + photo + del + '</div>' +
+             '<div class="cp-actions">' + statusHtml + photo + edit + del + '</div>' +
+             comm +
            '</div>';
   }).join('');
 }
@@ -1254,27 +1313,133 @@ function driveFileId(u) {
 }
 
 function renderPhotoModal() {
-  var rec  = chkGroupInfo(PH_MODAL_ID);
-  var list = (rec && rec.extra) || [];
+  var rec   = chkGroupInfo(PH_MODAL_ID);
+  var items = [];
+  // Основной файл чек-листа (обычно PDF) — первым
+  if (rec && rec.link) items.push({ n: rec.file || 'Файл чек-листа', u: rec.link, main: true });
+  ((rec && rec.extra) || []).forEach(function (f) { items.push(f); });
+
   document.getElementById('ph-title').textContent =
-    'Фотографии' + (rec && rec.number ? ' · № ' + rec.number : '');
+    'Файлы чек-листа' + (rec && rec.number ? ' · № ' + rec.number : '');
   var body = document.getElementById('ph-body');
-  if (!list.length) {
-    body.innerHTML = '<div class="ph-empty">Фотографий пока нет — нажмите «＋ Добавить»</div>';
+  if (!items.length) {
+    body.innerHTML = '<div class="ph-empty">Файлов пока нет — нажмите «＋ Добавить»</div>';
     return;
   }
-  body.innerHTML = list.map(function (f, i) {
+  body.innerHTML = items.map(function (f, i) {
     var fid   = driveFileId(f.u);
+    var isPdf = /\.pdf$/i.test(f.n || '');
+    var ico   = isPdf ? '📄' : '🖼';
+    // Миниатюра Диска (работает и для PDF); если не загрузилась — значок
     var thumb = fid
-      ? '<img class="ph-thumb" loading="lazy" alt="фото ' + (i + 1) + '"' +
+      ? '<img class="ph-thumb" loading="lazy" alt=""' +
         ' src="https://drive.google.com/thumbnail?id=' + e(fid) + '&sz=w300"' +
-        ' onerror="this.style.display=\'none\'">'
-      : '';
+        ' onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' +
+        '<div class="ph-ico" style="display:none">' + ico + '</div>'
+      : '<div class="ph-ico">' + ico + '</div>';
+    var label = (f.main ? '📋 ' : '') + (f.n || ('фото ' + (i + 1)));
     return '<a class="ph-item" href="' + e(f.u) + '" target="_blank" rel="noopener">' +
              thumb +
-             '<div class="ph-name">' + e(f.n || ('фото ' + (i + 1))) + '</div>' +
+             '<div class="ph-name">' + e(label) + '</div>' +
            '</a>';
   }).join('');
+}
+
+// ─── Правка этажей чек-листа ─────────────────────────────────────────────────
+var ED_CHK = null; // id чек-листа, открытого в модалке правки этажей
+
+function requestEditChecklist(id) {
+  if (!IS_ADMIN) { openPwd(function () { requestEditChecklist(id); }); return; }
+  var info = chkCells(id);
+  if (!info) { toast('Чек-лист не найден', 'err'); return; }
+  ED_CHK = id;
+  document.getElementById('ed-title').textContent =
+    'Этажи чек-листа' + (info.rec.number ? ' № ' + info.rec.number : '') + ' · ' + info.corpus;
+  // Доступные этажи — все этажи корпуса из реестра
+  var avail = {};
+  FLOORS.forEach(function (f) { if (f.corpus === info.corpus) avail[f.floor] = true; });
+  var floors = Object.keys(avail).map(Number).sort(function (a, b) { return b - a; });
+  document.getElementById('ed-body').innerHTML = floors.map(function (f) {
+    var chk = info.floors[String(f)] ? ' checked' : '';
+    return '<label class="ed-fl"><input type="checkbox" value="' + f + '"' + chk + '> ' + f + '</label>';
+  }).join('');
+  var sv = document.getElementById('ed-save');
+  sv.disabled = false; sv.textContent = 'Сохранить';
+  document.getElementById('ed-overlay').classList.remove('hide');
+}
+
+// Состав группы чек-листа: корпус, этажи, работы, первая запись
+function chkCells(id) {
+  var corpus = '', floors = {}, workIds = {}, rec = null;
+  for (var k in CHECK_BY_CELL) {
+    var recs = CHECK_BY_CELL[k];
+    for (var i = 0; i < recs.length; i++) {
+      if (String(recs[i].id) !== String(id)) continue;
+      var p = k.split('\x00');
+      corpus = p[1]; floors[p[2]] = true; workIds[p[0]] = true;
+      if (!rec) rec = recs[i];
+      break;
+    }
+  }
+  return rec ? { corpus: corpus, floors: floors, workIds: workIds, rec: rec } : null;
+}
+
+function closeEdit() {
+  ED_CHK = null;
+  document.getElementById('ed-overlay').classList.add('hide');
+}
+
+function saveEditFloors() {
+  if (!ED_CHK) return;
+  var id = ED_CHK;
+  var boxes  = document.querySelectorAll('#ed-body input:checked');
+  var floors = Array.prototype.slice.call(boxes).map(function (b) { return parseFloat(b.value); });
+  if (!floors.length) { toast('Отметьте хотя бы один этаж', 'err'); return; }
+  var sv = document.getElementById('ed-save');
+  sv.disabled = true; sv.textContent = 'Сохранение…';
+  setSt('spin', '…');
+  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'editChecklistFloors', id: id, floors: floors, user: getUserName() }) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
+      applyLocalFloors(id, floors);
+      setSt('ok', 'сохранено');
+      toast('Этажи обновлены (добавлено ' + d.added + ', убрано ' + d.removed + ')', 'ok');
+      closeEdit();
+      render();
+    })
+    .catch(function (err) {
+      sv.disabled = false; sv.textContent = 'Сохранить';
+      setSt('err', 'ошибка');
+      toast('Ошибка: ' + err.message, 'err', 6000);
+    });
+}
+
+// Локально перестроить записи группы под новый набор этажей (без перезагрузки)
+function applyLocalFloors(id, floors) {
+  var info = chkCells(id);
+  if (!info) return;
+  var want = {};
+  floors.forEach(function (f) { want[String(f)] = true; });
+  // Убрать записи с этажей, которых больше нет
+  for (var k in CHECK_BY_CELL) {
+    var p = k.split('\x00');
+    if (p[1] !== info.corpus || want[p[2]]) continue;
+    var left = CHECK_BY_CELL[k].filter(function (r) { return String(r.id) !== String(id); });
+    if (left.length) CHECK_BY_CELL[k] = left;
+    else delete CHECK_BY_CELL[k];
+  }
+  // Добавить записи на новые этажи — по каждой работе группы
+  for (var fl in want) {
+    if (info.floors[fl]) continue;
+    for (var w in info.workIds) {
+      var key  = w + '\x00' + info.corpus + '\x00' + fl;
+      var recs = CHECK_BY_CELL[key] = CHECK_BY_CELL[key] || [];
+      var copy = {};
+      for (var prop in info.rec) copy[prop] = info.rec[prop];
+      recs.push(copy);
+    }
+  }
 }
 
 // ─── Догрузка фотографий к чек-листу ─────────────────────────────────────────
