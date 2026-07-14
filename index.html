@@ -361,6 +361,15 @@ body.chk-open .board-wrap { margin-right: 324px; }
 #addbar.hide { display: none; }
 #addbar-info { font-size: 13px; }
 #addbar .btn { padding: 6px 14px; }
+#addbar-edit { display: flex; gap: 6px; align-items: center; }
+#addbar-edit.hide { display: none; }
+.ab-inp {
+  padding: 5px 8px; border: none; border-radius: 5px;
+  font-size: 12px; font-family: inherit;
+}
+#ab-num  { width: 130px; }
+#ab-date { width: 130px; }
+#ab-comm { width: 170px; }
 
 /* ── UPLOAD MODAL ── */
 #up-overlay {
@@ -510,6 +519,11 @@ body.chk-open .board-wrap { margin-right: 324px; }
 <!-- ADD-MODE ACTION BAR (выделение ячеек) -->
 <div id="addbar" class="hide">
   <span id="addbar-info">Выберите ячейки одного корпуса</span>
+  <span id="addbar-edit" class="hide">
+    <input id="ab-num" class="ab-inp" placeholder="№ чек-листа" title="Номер чек-листа">
+    <input id="ab-date" class="ab-inp" type="date" title="Дата чек-листа">
+    <input id="ab-comm" class="ab-inp" placeholder="Комментарий" title="Комментарий">
+  </span>
   <button class="btn btn-pri" id="addbar-up" onclick="addbarPrimary()">Загрузить чек-лист</button>
   <button class="btn" onclick="cancelAdd()">Отмена</button>
 </div>
@@ -1326,9 +1340,19 @@ function requestEditChecklist(id) {
   document.body.classList.add('add-mode');
   document.getElementById('add-chk-btn').classList.add('on');
   document.getElementById('addbar').classList.remove('hide');
+  // Поля правки: номер, дата, комментарий — заполняем текущими значениями
+  document.getElementById('ab-num').value  = info.rec.number || '';
+  document.getElementById('ab-date').value = ruDateToISO(info.rec.date);
+  document.getElementById('ab-comm').value = info.rec.comment || '';
   updateAddbar();
   render();
   toast('Кликайте по ячейкам, чтобы изменить состав, затем «Сохранить»', 'inf', 5000);
+}
+
+// «10.12.2025» → «2025-12-10» (для input type=date); не распозналось — пусто
+function ruDateToISO(d) {
+  var m = String(d || '').match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  return m ? m[3] + '-' + m[2] + '-' + m[1] : '';
 }
 
 // Состав группы чек-листа: корпус, список ячеек (работа+этаж), первая запись
@@ -1357,18 +1381,25 @@ function addbarPrimary() {
 function saveEditCells() {
   var keys = Object.keys(SELECTED);
   if (!keys.length) { toast('Выберите хотя бы одну ячейку', 'err'); return; }
-  var id     = EDIT_CHK;
-  var corpus = ADD_CORPUS;
-  var cells  = keys.map(function (k) {
+  var id      = EDIT_CHK;
+  var corpus  = ADD_CORPUS;
+  var number  = document.getElementById('ab-num').value.trim();
+  var dateISO = document.getElementById('ab-date').value;        // YYYY-MM-DD
+  var comment = document.getElementById('ab-comm').value.trim();
+  var cells   = keys.map(function (k) {
     return { workId: SELECTED[k].workId, floor: SELECTED[k].floor };
   });
   var btn = document.getElementById('addbar-up');
   btn.disabled = true; btn.textContent = 'Сохранение…';
   setSt('spin', '…');
-  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'editChecklistCells', id: id, cells: cells, user: getUserName() }) })
+  fetch(BASE, { method: 'POST', body: JSON.stringify({
+    action: 'editChecklistCells', id: id, cells: cells,
+    number: number, date: dateISO, comment: comment, user: getUserName(),
+  }) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
+      updateLocalChecklistMeta(id, number, dateISO, comment);
       applyLocalCells(id, corpus, cells);
       setSt('ok', 'сохранено');
       toast('Чек-лист обновлён (добавлено ' + d.added + ', убрано ' + d.removed + ')', 'ok');
@@ -1379,6 +1410,20 @@ function saveEditCells() {
       setSt('err', 'ошибка');
       toast('Ошибка: ' + err.message, 'err', 6000);
     });
+}
+
+// Локально обновить №, дату и комментарий во всех записях группы
+function updateLocalChecklistMeta(id, number, dateISO, comment) {
+  var m  = String(dateISO || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  var ru = m ? m[3] + '.' + m[2] + '.' + m[1] : null;
+  for (var k in CHECK_BY_CELL) {
+    CHECK_BY_CELL[k].forEach(function (r) {
+      if (String(r.id) !== String(id)) return;
+      r.number  = number;
+      r.comment = comment;
+      if (ru) r.date = ru;
+    });
+  }
 }
 
 // Локально перенести записи группы на новый состав ячеек (без перезагрузки)
@@ -1681,14 +1726,13 @@ function updateAddbar() {
   var info = document.getElementById('addbar-info');
   var btn  = document.getElementById('addbar-up');
   if (EDIT_CHK) {
-    var rec = chkGroupInfo(EDIT_CHK);
-    var num = (rec && rec.number) ? ' № ' + rec.number : '';
-    info.textContent = 'Правка чек-листа' + num + ' · корпус ' + ADD_CORPUS + ' · ячеек: ' + n;
+    info.textContent = 'Правка · ' + ADD_CORPUS + ' · ячеек: ' + n;
     btn.textContent = 'Сохранить';
   } else {
     info.textContent = n ? ('Корпус ' + ADD_CORPUS + ' · выбрано ячеек: ' + n) : 'Выберите ячейки одного корпуса';
     btn.textContent = 'Загрузить чек-лист';
   }
+  document.getElementById('addbar-edit').classList.toggle('hide', !EDIT_CHK);
   btn.disabled = !n;
 }
 

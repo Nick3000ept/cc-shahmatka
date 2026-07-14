@@ -557,14 +557,19 @@ function addInternalChecklistFile(body) {
   return { ok: true, name: file.getName(), url: file.getUrl(), files: list.length };
 }
 
-// Правка состава чек-листа. body: { id, cells:[{workId,floor}], user }
+// Правка состава чек-листа.
+// body: { id, cells:[{workId,floor}], number?, date?(YYYY-MM-DD), comment?, user }
 // cells — полный новый набор ячеек (работа+этаж) группы, минимум одна.
+// number/date/comment, если переданы, обновляют № (J), дату (B) и комментарий (I) всей группы.
 // Строки НЕ удаляются (правило безопасности): убранная ячейка — её строка помечается
 // статусом «Удалён»; добавленная — новая строка с копией полей из существующей.
 function editInternalChecklistCells(body) {
-  var id    = String(body.id   || '').trim();
-  var user  = String(body.user || '').trim();
-  var cells = body.cells || [];
+  var id      = String(body.id   || '').trim();
+  var user    = String(body.user || '').trim();
+  var cells   = body.cells || [];
+  var number  = (body.number  !== undefined) ? String(body.number).trim()  : null;
+  var comment = (body.comment !== undefined) ? String(body.comment).trim() : null;
+  var dateStr = body.date ? normDateIn(body.date) : null;
   if (!id)           throw new Error('Не указан ID чек-листа');
   if (!cells.length) throw new Error('Нужна хотя бы одна ячейка');
 
@@ -593,9 +598,18 @@ function editInternalChecklistCells(body) {
   }
   if (!active.length) throw new Error('Чек-лист не найден: ' + id);
 
-  var mark = changeMark_(user, 'состав изменён');
+  var mark = changeMark_(user, 'изменён');
 
-  // Убранные ячейки — пометить строки «Удалён»
+  // Итоговые дата/№/комментарий группы (переданы — новые, нет — прежние)
+  var newDate = (dateStr !== null) ? dateStr : tpl[1];
+  var newNum  = (number  !== null) ? number  : tpl[9];
+  var newComm = (comment !== null) ? comment : tpl[8];
+  var metaChanged =
+    (dateStr !== null && dateStr !== formatDateOut(tpl[1])) ||
+    (number  !== null && number  !== String(tpl[9]).trim()) ||
+    (comment !== null && comment !== String(tpl[8]).trim());
+
+  // Убранные ячейки — пометить «Удалён»; остающиеся — обновить дату/№/комментарий
   var removed = 0;
   active.forEach(function (i) {
     var key = String(vals[i][3]).trim() + '\x00' + floorNorm(vals[i][4]);
@@ -603,10 +617,15 @@ function editInternalChecklistCells(body) {
       sheet.getRange(i + 2, 6).setValue('Удалён');
       sheet.getRange(i + 2, 13).setValue(mark);
       removed++;
+    } else if (metaChanged) {
+      sheet.getRange(i + 2, 2).setValue(newDate);   // B дата
+      sheet.getRange(i + 2, 9).setValue(newComm);   // I комментарий
+      sheet.getRange(i + 2, 10).setValue(newNum);   // J номер
+      sheet.getRange(i + 2, 13).setValue(mark);     // M изменено
     }
   });
 
-  // Добавленные ячейки — новые строки с копией полей группы
+  // Добавленные ячейки — новые строки с копией полей группы (и новыми датой/№/комментарием)
   var newRows = [];
   for (var key in want) {
     if (have[key]) continue;
@@ -615,8 +634,8 @@ function editInternalChecklistCells(body) {
     if (isNaN(flVal)) flVal = c.floor;
     // A id · B дата · C корпус · D работа · E этаж · F статус · G ссылка · H файл ·
     // I комментарий · J номер · K доп файлы · L загрузил · M изменено
-    newRows.push([id, tpl[1], tpl[2], String(c.workId).trim(), flVal,
-                  tpl[5], tpl[6], tpl[7], tpl[8], tpl[9], tpl[10], tpl[11], mark]);
+    newRows.push([id, newDate, tpl[2], String(c.workId).trim(), flVal,
+                  tpl[5], tpl[6], tpl[7], newComm, newNum, tpl[10], tpl[11], mark]);
   }
   if (newRows.length) {
     sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 13).setValues(newRows);
