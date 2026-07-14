@@ -242,24 +242,25 @@ body.chk-open .board-wrap { margin-right: 324px; }
 .toast.inf { background: #2196f3; }
 @keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; } }
 
-/* ── PASSWORD MODAL ── */
-#pwd-overlay {
+/* ── PASSWORD / NAME MODAL ── */
+#pwd-overlay, #nm-overlay {
   position: fixed; inset: 0;
   background: rgba(0,0,0,.5);
   display: flex; align-items: center; justify-content: center;
   z-index: 500;
 }
-#pwd-overlay.hide { display: none; }
-#pwd-box {
+#pwd-overlay.hide, #nm-overlay.hide { display: none; }
+#pwd-box, #nm-box {
   background: #fff; padding: 24px 28px; border-radius: 10px;
   width: 300px; box-shadow: 0 8px 32px rgba(0,0,0,.15);
 }
-#pwd-box h3 { margin-bottom: 14px; font-size: 15px; color: #1a3a6b; }
-#pwd-inp {
+#pwd-box h3, #nm-box h3 { margin-bottom: 14px; font-size: 15px; color: #1a3a6b; }
+#pwd-inp, #nm-inp {
   width: 100%; padding: 9px 10px;
   border: 1px solid #ccc; border-radius: 5px;
   margin-bottom: 10px; font-size: 14px;
 }
+.nm-note { font-size: 12px; color: #888; margin: -8px 0 10px; }
 .pwd-btns { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* ── WHAT'S NEW MODAL ── */
@@ -367,9 +368,10 @@ body.chk-open .board-wrap { margin-right: 324px; }
   padding: 5px 8px; border: none; border-radius: 5px;
   font-size: 12px; font-family: inherit;
 }
-#ab-num  { width: 130px; }
+#ab-num  { width: 120px; }
 #ab-date { width: 130px; }
-#ab-comm { width: 170px; }
+#ab-comm { width: 150px; }
+#ab-user { width: 120px; }
 
 /* ── UPLOAD MODAL ── */
 #up-overlay {
@@ -523,6 +525,7 @@ body.chk-open .board-wrap { margin-right: 324px; }
     <input id="ab-num" class="ab-inp" placeholder="№ чек-листа" title="Номер чек-листа">
     <input id="ab-date" class="ab-inp" type="date" title="Дата чек-листа">
     <input id="ab-comm" class="ab-inp" placeholder="Комментарий" title="Комментарий">
+    <input id="ab-user" class="ab-inp" placeholder="Ваше имя *" title="Имя — обязательно, пишется в историю изменений">
   </span>
   <button class="btn btn-pri" id="addbar-up" onclick="addbarPrimary()">Загрузить чек-лист</button>
   <button class="btn" onclick="cancelAdd()">Отмена</button>
@@ -539,6 +542,10 @@ body.chk-open .board-wrap { margin-right: 324px; }
       <div class="up-field">
         <label>Работы в чек-листе</label>
         <div id="up-cells"></div>
+      </div>
+      <div class="up-field">
+        <label for="up-user">Ваше имя (обязательно)</label>
+        <input type="text" id="up-user" placeholder="Имя и фамилия">
       </div>
       <div class="up-field">
         <label for="up-status">Статус</label>
@@ -581,6 +588,20 @@ body.chk-open .board-wrap { margin-right: 324px; }
     </div>
     <div id="card-meta"></div>
     <div id="card-checklists"></div>
+  </div>
+</div>
+
+<!-- NAME MODAL (обязательное имя для истории изменений) -->
+<div id="nm-overlay" class="hide">
+  <div id="nm-box">
+    <h3>Ваше имя</h3>
+    <div class="nm-note">Записывается в историю изменений чек-листов</div>
+    <input id="nm-inp" placeholder="Имя и фамилия"
+      onkeydown="if(event.key==='Enter')submitName()">
+    <div class="pwd-btns">
+      <button class="btn" onclick="closeName()">Отмена</button>
+      <button class="btn btn-pri" onclick="submitName()">Сохранить</button>
+    </div>
   </div>
 </div>
 
@@ -1228,6 +1249,7 @@ function chkFloorSet(id) {
 // На сервере строки не удаляются, а помечаются статусом «Удалён» и скрываются.
 function requestDeleteChecklist(id, num) {
   if (!IS_ADMIN) { openPwd(function () { requestDeleteChecklist(id, num); }); return; }
+  if (!getUserName()) { openName(function () { requestDeleteChecklist(id, num); }); return; }
   var name = num ? '№ ' + num : '';
   if (!confirm('Удалить чек-лист ' + (name ? name + ' ' : '') + 'из шахматки?')) return;
   setSt('spin', '…');
@@ -1344,6 +1366,7 @@ function requestEditChecklist(id) {
   document.getElementById('ab-num').value  = info.rec.number || '';
   document.getElementById('ab-date').value = ruDateToISO(info.rec.date);
   document.getElementById('ab-comm').value = info.rec.comment || '';
+  document.getElementById('ab-user').value = getUserName();
   updateAddbar();
   render();
   toast('Кликайте по ячейкам, чтобы изменить состав, затем «Сохранить»', 'inf', 5000);
@@ -1379,6 +1402,8 @@ function addbarPrimary() {
 }
 
 function saveEditCells() {
+  var user = takeNameFrom('ab-user');
+  if (!user) return;
   var keys = Object.keys(SELECTED);
   if (!keys.length) { toast('Выберите хотя бы одну ячейку', 'err'); return; }
   var id      = EDIT_CHK;
@@ -1394,7 +1419,7 @@ function saveEditCells() {
   setSt('spin', '…');
   fetch(BASE, { method: 'POST', body: JSON.stringify({
     action: 'editChecklistCells', id: id, cells: cells,
-    number: number, date: dateISO, comment: comment, user: getUserName(),
+    number: number, date: dateISO, comment: comment, user: user,
   }) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -1451,6 +1476,7 @@ var PHOTO_CHK = null; // id чек-листа, к которому догруж�
 
 function requestAddPhotos(id) {
   if (!IS_ADMIN) { openPwd(function () { requestAddPhotos(id); }); return; }
+  if (!getUserName()) { openName(function () { requestAddPhotos(id); }); return; }
   PHOTO_CHK = id;
   var inp = document.getElementById('cp-photo-inp');
   inp.value = '';
@@ -1633,6 +1659,7 @@ function changeChecklistStatus(sel) {
   var status = sel.value;
   var prev   = sel.dataset.prev || '';
   if (status === prev) return;
+  if (!getUserName()) { openName(function () { changeChecklistStatus(sel); }); return; }
   sel.disabled = true;
   setSt('spin', '…');
   fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'setChecklistStatus', id: id, status: status, user: getUserName() }) })
@@ -1747,6 +1774,7 @@ function openUpload() {
   }).join('');
   document.getElementById('up-file').value    = '';
   document.getElementById('up-comment').value = '';
+  document.getElementById('up-user').value    = getUserName();
   document.getElementById('up-status').selectedIndex = 0;
   document.getElementById('up-number').value = '';
   document.getElementById('up-date').value   = todayISO();
@@ -1758,6 +1786,8 @@ function openUpload() {
 function closeUpload() { document.getElementById('up-overlay').classList.add('hide'); }
 
 function submitUpload() {
+  var user = takeNameFrom('up-user');
+  if (!user) return;
   var f = document.getElementById('up-file').files[0];
   if (!f) { toast('Выберите файл', 'err'); return; }
   if (!/\.(pdf|png)$/i.test(f.name)) { toast('Допустимы только PDF или PNG', 'err'); return; }
@@ -1781,7 +1811,7 @@ function submitUpload() {
     var b64 = String(reader.result).split(',')[1] || '';
     var payload = {
       action: 'addChecklist', corpus: corpus, cells: cells,
-      status: status, comment: comment, number: number, date: date, user: getUserName(),
+      status: status, comment: comment, number: number, date: date, user: user,
       fileName: f.name, mimeType: f.type || 'application/octet-stream', fileData: b64,
     };
     fetch(BASE, { method: 'POST', body: JSON.stringify(payload) })
@@ -1874,7 +1904,7 @@ function submitPwd() {
         setAuthBtn(true);
         closePwd();
         toast('Вход выполнен', 'ok');
-        getUserName(); // один раз спросить имя — пишется в историю изменений
+        if (!getUserName()) openName(null); // сразу предложить заполнить имя
         if (_pwdCb) { var cb = _pwdCb; _pwdCb = null; cb(); }
       } else {
         toast('Неверный пароль', 'err');
@@ -1883,14 +1913,40 @@ function submitPwd() {
     .catch(function () { toast('Ошибка проверки пароля', 'err'); });
 }
 
-// Имя пользователя для истории изменений (спрашивается один раз, хранится в браузере)
+// ─── Имя пользователя (обязательно для любых изменений) ─────────────────────
+var _nameCb = null;
+
 function getUserName() {
-  var n = localStorage.getItem('cc_user');
-  if (n === null) {
-    n = (prompt('Как вас записывать в истории изменений? (имя и фамилия)') || '').trim();
-    try { localStorage.setItem('cc_user', n); } catch (e) {}
-  }
-  return n || '';
+  return (localStorage.getItem('cc_user') || '').trim();
+}
+
+function openName(cb) {
+  _nameCb = cb || null;
+  var inp = document.getElementById('nm-inp');
+  inp.value = getUserName();
+  document.getElementById('nm-overlay').classList.remove('hide');
+  setTimeout(function () { inp.focus(); }, 50);
+}
+
+function closeName() {
+  document.getElementById('nm-overlay').classList.add('hide');
+  _nameCb = null;
+}
+
+function submitName() {
+  var v = document.getElementById('nm-inp').value.trim();
+  if (!v) { toast('Введите имя — без него изменения не сохраняются', 'err'); return; }
+  try { localStorage.setItem('cc_user', v); } catch (e) {}
+  document.getElementById('nm-overlay').classList.add('hide');
+  if (_nameCb) { var cb = _nameCb; _nameCb = null; cb(); }
+}
+
+// Сохранить имя из видимого поля формы (загрузка/правка); пустое — ошибка
+function takeNameFrom(inputId) {
+  var v = document.getElementById(inputId).value.trim();
+  if (!v) { toast('Укажите ваше имя — оно пишется в историю изменений', 'err'); return null; }
+  try { localStorage.setItem('cc_user', v); } catch (e) {}
+  return v;
 }
 
 function setAuthBtn(admin) {
