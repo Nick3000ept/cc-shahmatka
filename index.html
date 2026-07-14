@@ -1120,7 +1120,7 @@ function collectChecklists(cols) {
           id: r.id, number: r.number || '', akt: r.akt || '',
           status: r.status || '', date: r.date || '',
           corpus: p[1], source: r.source, floors: {},
-          extra: r.extra || [],
+          extra: r.extra || [], by: r.by || '',
         };
         order.push(g);
       }
@@ -1163,7 +1163,8 @@ function renderChkPanel(cols) {
       ? '<button class="cp-del" data-del="' + e(g.id) + '" data-num="' + e(g.number) + '" title="Удалить чек-лист">🗑</button>'
       : '';
     var sel = String(SEL_CHK) === String(g.id) ? ' sel' : '';
-    return '<div class="cp-item' + sel + '" data-id="' + e(g.id) + '">' +
+    var tip = g.by ? ' title="Загрузил: ' + e(g.by) + '"' : '';
+    return '<div class="cp-item' + sel + '" data-id="' + e(g.id) + '"' + tip + '>' +
              '<div class="cp-top"><span class="cp-num">' + e(num) + '</span></div>' +
              '<div class="cp-loc">' + e(g.corpus) + ' · эт. ' + e(fl.join(', ')) +
              (g.date ? ' · ' + e(g.date) : '') + '</div>' +
@@ -1201,7 +1202,7 @@ function requestDeleteChecklist(id, num) {
   var name = num ? '№ ' + num : '';
   if (!confirm('Удалить чек-лист ' + (name ? name + ' ' : '') + 'из шахматки?')) return;
   setSt('spin', '…');
-  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'deleteChecklist', id: id }) })
+  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'deleteChecklist', id: id, user: getUserName() }) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
@@ -1315,7 +1316,7 @@ function uploadChecklistPhotos(fileList) {
     reader.onload = function () {
       var b64 = String(reader.result).split(',')[1] || '';
       fetch(BASE, { method: 'POST', body: JSON.stringify({
-        action: 'addChecklistFile', id: id,
+        action: 'addChecklistFile', id: id, user: getUserName(),
         fileName: f.name, mimeType: f.type || 'application/octet-stream', fileData: b64,
       }) })
         .then(function (r) { return r.json(); })
@@ -1414,6 +1415,7 @@ function openWorkCard(corpus, pod, floorNum, workId) {
         if (c.number) info.push('№ ' + c.number);
         if (c.file)   info.push(c.file);
         if (c.date)   info.push(c.date);
+        if (c.by)     info.push('загрузил: ' + c.by);
         var src = c.source === 'internal' ? '<span class="cl-src">загружен</span>' : '';
         // Внутренние чек-листы админ может редактировать (статус на всю группу), внешние — read-only
         var statusHtml = (c.source === 'internal' && IS_ADMIN)
@@ -1464,7 +1466,7 @@ function changeChecklistStatus(sel) {
   if (status === prev) return;
   sel.disabled = true;
   setSt('spin', '…');
-  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'setChecklistStatus', id: id, status: status }) })
+  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'setChecklistStatus', id: id, status: status, user: getUserName() }) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
@@ -1601,7 +1603,7 @@ function submitUpload() {
     var b64 = String(reader.result).split(',')[1] || '';
     var payload = {
       action: 'addChecklist', corpus: corpus, cells: cells,
-      status: status, comment: comment, number: number, date: date,
+      status: status, comment: comment, number: number, date: date, user: getUserName(),
       fileName: f.name, mimeType: f.type || 'application/octet-stream', fileData: b64,
     };
     fetch(BASE, { method: 'POST', body: JSON.stringify(payload) })
@@ -1694,12 +1696,23 @@ function submitPwd() {
         setAuthBtn(true);
         closePwd();
         toast('Вход выполнен', 'ok');
+        getUserName(); // один раз спросить имя — пишется в историю изменений
         if (_pwdCb) { var cb = _pwdCb; _pwdCb = null; cb(); }
       } else {
         toast('Неверный пароль', 'err');
       }
     })
     .catch(function () { toast('Ошибка проверки пароля', 'err'); });
+}
+
+// Имя пользователя для истории изменений (спрашивается один раз, хранится в браузере)
+function getUserName() {
+  var n = localStorage.getItem('cc_user');
+  if (n === null) {
+    n = (prompt('Как вас записывать в истории изменений? (имя и фамилия)') || '').trim();
+    try { localStorage.setItem('cc_user', n); } catch (e) {}
+  }
+  return n || '';
 }
 
 function setAuthBtn(admin) {

@@ -305,10 +305,11 @@ function readChecklists(ss) {
 // Дописываем в тот же checkByCell, что и внешние.
 // Колонки: A ID  B Дата  C Корпус  D ID_работы  E Этаж  F Статус  G Ссылка  H Файл  I Комментарий  J Номер
 //          K Доп файлы (JSON-массив [{n:имя, u:ссылка}] — догруженные фотографии)
+//          L Загрузил (имя из формы)  M Изменено (кто · когда · что — последнее изменение)
 function addInternalChecklists(ss, checkByCell) {
   var sheet = ss.getSheetByName(CHK_INT_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return;
-  sheet.getRange(2, 1, sheet.getLastRow() - 1, 11).getValues().forEach(function (r) {
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, 12).getValues().forEach(function (r) {
     var workId = String(r[3]).trim();
     var corpus = String(r[2]).trim();
     if (!workId || !corpus) return;
@@ -328,6 +329,7 @@ function addInternalChecklists(ss, checkByCell) {
       file   : String(r[7]).trim(),
       comment: String(r[8]).trim(),
       extra  : extra,
+      by     : String(r[11]).trim(),
       source : 'internal',
     });
   });
@@ -388,18 +390,27 @@ function saveInternalChecklist(body) {
   var status  = String(body.status  || '').trim();
   var comment = String(body.comment || '').trim();
   var number  = String(body.number  || '').trim();       // номер чек-листа
+  var user    = String(body.user    || '').trim();       // кто загрузил (имя из формы)
   var dateStr = normDateIn(body.date);                    // дата чек-листа (dd.MM.yyyy)
   if (!corpus)        throw new Error('Не указан корпус');
   if (!cells.length)  throw new Error('Не выбраны работы');
   if (!body.fileData) throw new Error('Файл не передан');
 
-  // 1) Файл на Google Диск (доступ «по ссылке»)
+  // 1) Файл на Google Диск (доступ «по ссылке»), с понятным именем:
+  //    СС_К4_эт.2,3_№7_Есть замечания_10.12.2025.pdf
+  var floorsSet = {};
+  cells.forEach(function (c) { var f = floorNorm(c.floor); if (f) floorsSet[f] = true; });
+  var floorsArr = Object.keys(floorsSet).sort(function (a, b) { return parseFloat(a) - parseFloat(b); });
+  var ext  = fileExt_(body.fileName, body.mimeType);
+  var nice = safeFileName_(
+    'СС_' + corpus + '_эт.' + floorsArr.join(',') +
+    (number ? '_№' + number : '') +
+    '_' + (status || 'Без статуса') + '_' + dateStr
+  ) + '.' + ext;
+
   var folder = getOrCreateChecklistFolder();
-  var blob   = Utilities.newBlob(
-    Utilities.base64Decode(body.fileData),
-    body.mimeType || 'application/octet-stream',
-    body.fileName || ('checklist_' + Date.now())
-  );
+  var blob   = Utilities.newBlob(Utilities.base64Decode(body.fileData),
+    body.mimeType || 'application/octet-stream', nice);
   var file = folder.createFile(blob);
   try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
   var url   = file.getUrl();
@@ -408,11 +419,10 @@ function saveInternalChecklist(body) {
   // 2) Строки в лист «Чек листы_внутренние» — по одной на (работа+этаж)
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CHK_INT_SHEET) || createInternalSheet(ss);
-  // Гарантируем шапку столбца J «Номер» (если лист создан старой версией на 9 столбцов)
-  if (String(sheet.getRange(1, 10).getValue()).trim() !== 'Номер') sheet.getRange(1, 10).setValue('Номер');
+  ensureIntHeaders_(sheet);
   var group = 'IC-' + Date.now();
   var rows  = cells.map(function (c) {
-    return [group, dateStr, corpus, String(c.workId).trim(), c.floor, status, url, fname, comment, number];
+    return [group, dateStr, corpus, String(c.workId).trim(), c.floor, status, url, fname, comment, number, '', user];
   });
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
   SpreadsheetApp.flush();
@@ -420,36 +430,76 @@ function saveInternalChecklist(body) {
   return { ok: true, id: group, url: url, rows: rows.length };
 }
 
+// Шапки столбцов J–M (лист мог быть создан старой версией с меньшим числом столбцов)
+function ensureIntHeaders_(sheet) {
+  var want = { 10: 'Номер', 11: 'Доп файлы', 12: 'Загрузил', 13: 'Изменено' };
+  for (var col in want) {
+    if (String(sheet.getRange(1, Number(col)).getValue()).trim() !== want[col]) {
+      sheet.getRange(1, Number(col)).setValue(want[col]);
+    }
+  }
+}
+
+// Имя файла без запрещённых символов, схлопнутые пробелы
+function safeFileName_(s) {
+  return String(s).replace(/[\\\/:*?"<>|#]/g, '-').replace(/\s+/g, ' ').trim();
+}
+
+// Расширение файла: из имени, иначе из mime-типа
+function fileExt_(name, mime) {
+  var m = String(name || '').match(/\.([A-Za-z0-9]{1,5})$/);
+  if (m) return m[1].toLowerCase();
+  if (/pdf/i.test(mime))  return 'pdf';
+  if (/png/i.test(mime))  return 'png';
+  if (/jpe?g/i.test(mime)) return 'jpg';
+  if (/webp/i.test(mime)) return 'webp';
+  if (/heic/i.test(mime)) return 'heic';
+  return 'bin';
+}
+
+// Отметка «кто · когда · что» для столбца M «Изменено»
+function changeMark_(user, what) {
+  var d = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd.MM.yyyy HH:mm');
+  return (user ? user + ' · ' : '') + d + ' · ' + what;
+}
+
 // Сменить статус внутреннего чек-листа (всей группы) — обновляет столбец F во всех строках с этим ID
 function setInternalChecklistStatus(body) {
   var id     = String(body.id     || '').trim();
   var status = String(body.status || '').trim();
+  var user   = String(body.user   || '').trim();
   if (!id)     throw new Error('Не указан ID чек-листа');
   if (!status) throw new Error('Не указан статус');
 
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CHK_INT_SHEET);
   if (!sheet || sheet.getLastRow() < 2) throw new Error('Лист «Чек листы_внутренние» пуст');
+  ensureIntHeaders_(sheet);
 
   var n    = sheet.getLastRow() - 1;
-  var idA  = sheet.getRange(2, 1, n, 1).getValues();  // столбец A (ID группы)
-  var fCol = sheet.getRange(2, 6, n, 1).getValues();  // столбец F (Статус)
+  var idA  = sheet.getRange(2, 1, n, 1).getValues();   // столбец A (ID группы)
+  var fCol = sheet.getRange(2, 6, n, 1).getValues();   // столбец F (Статус)
+  var mCol = sheet.getRange(2, 13, n, 1).getValues();  // столбец M (Изменено)
+  var mark = changeMark_(user, 'статус: ' + status);
   var updated = 0;
   for (var i = 0; i < n; i++) {
-    if (String(idA[i][0]).trim() === id) { fCol[i][0] = status; updated++; }
+    if (String(idA[i][0]).trim() === id) { fCol[i][0] = status; mCol[i][0] = mark; updated++; }
   }
   if (!updated) throw new Error('Чек-лист не найден: ' + id);
   sheet.getRange(2, 6, n, 1).setValues(fCol);
+  sheet.getRange(2, 13, n, 1).setValues(mCol);
   SpreadsheetApp.flush();
   return { ok: true, updated: updated };
 }
 
 // Догрузка файла (фото) к существующему внутреннему чек-листу.
-// body: { id, fileName, mimeType, fileData(base64) }
-// Файл → папка «Чек листы СС»; запись [{n:имя, u:ссылка}] дописывается в JSON-массив
-// столбца K «Доп файлы» во всех строках группы.
+// body: { id, user, fileName, mimeType, fileData(base64) }
+// Файл → папка «Чек листы СС» с понятным именем (СС_К4_эт.2,3_№7_фото2.jpg);
+// запись [{n:имя, u:ссылка}] дописывается в JSON-массив столбца K «Доп файлы»
+// во всех строках группы, столбец M получает отметку «кто · когда · что».
 function addInternalChecklistFile(body) {
-  var id = String(body.id || '').trim();
+  var id   = String(body.id   || '').trim();
+  var user = String(body.user || '').trim();
   if (!id)            throw new Error('Не указан ID чек-листа');
   if (!body.fileData) throw new Error('Файл не передан');
 
@@ -457,34 +507,48 @@ function addInternalChecklistFile(body) {
   var sheet = ss.getSheetByName(CHK_INT_SHEET);
   if (!sheet || sheet.getLastRow() < 2) throw new Error('Лист «Чек листы_внутренние» пуст');
 
-  var n   = sheet.getLastRow() - 1;
-  var idA = sheet.getRange(2, 1, n, 1).getValues();  // столбец A (ID группы)
-  var rowsIdx = [];
+  var n    = sheet.getLastRow() - 1;
+  var vals = sheet.getRange(2, 1, n, 11).getValues(); // A–K
+  var rowsIdx = [], floorsSet = {}, corpus = '', number = '';
   for (var i = 0; i < n; i++) {
-    if (String(idA[i][0]).trim() === id) rowsIdx.push(i + 2);
+    if (String(vals[i][0]).trim() !== id) continue;
+    rowsIdx.push(i + 2);
+    if (!corpus) corpus = String(vals[i][2]).trim();
+    if (!number) number = String(vals[i][9]).trim();
+    var fl = floorNorm(vals[i][4]);
+    if (fl) floorsSet[fl] = true;
   }
   if (!rowsIdx.length) throw new Error('Чек-лист не найден: ' + id);
 
-  // Гарантируем шапку столбца K
-  if (String(sheet.getRange(1, 11).getValue()).trim() !== 'Доп файлы') sheet.getRange(1, 11).setValue('Доп файлы');
+  ensureIntHeaders_(sheet);
+
+  // Уже приложенные файлы (K одинаков во всей группе)
+  var list = [];
+  try {
+    var cur = JSON.parse(String(vals[rowsIdx[0] - 2][10]));
+    if (cur && cur.length) list = cur;
+  } catch (e2) {}
+
+  var floors = Object.keys(floorsSet).sort(function (a, b) { return parseFloat(a) - parseFloat(b); });
+  var ext  = fileExt_(body.fileName, body.mimeType);
+  var nice = safeFileName_(
+    'СС_' + corpus + '_эт.' + floors.join(',') +
+    (number ? '_№' + number : '') + '_фото' + (list.length + 1)
+  ) + '.' + ext;
 
   var folder = getOrCreateChecklistFolder();
-  var blob   = Utilities.newBlob(
-    Utilities.base64Decode(body.fileData),
-    body.mimeType || 'application/octet-stream',
-    body.fileName || ('photo_' + Date.now())
-  );
+  var blob   = Utilities.newBlob(Utilities.base64Decode(body.fileData),
+    body.mimeType || 'application/octet-stream', nice);
   var file = folder.createFile(blob);
   try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
 
-  var list = [];
-  try {
-    var cur = JSON.parse(String(sheet.getRange(rowsIdx[0], 11).getValue()));
-    if (cur && cur.length) list = cur;
-  } catch (e2) {}
   list.push({ n: file.getName(), u: file.getUrl() });
   var json = JSON.stringify(list);
-  rowsIdx.forEach(function (row) { sheet.getRange(row, 11).setValue(json); });
+  var mark = changeMark_(user, '+фото');
+  rowsIdx.forEach(function (row) {
+    sheet.getRange(row, 11).setValue(json);
+    sheet.getRange(row, 13).setValue(mark);
+  });
   SpreadsheetApp.flush();
   return { ok: true, name: file.getName(), url: file.getUrl(), files: list.length };
 }
@@ -493,30 +557,36 @@ function addInternalChecklistFile(body) {
 // вся группа помечается статусом «Удалён» (столбец F) и перестаёт отдаваться фронту.
 // Файл на Диске остаётся. Восстановление — вручную вернуть прежний статус в листе.
 function deleteInternalChecklist(body) {
-  var id = String(body.id || '').trim();
+  var id   = String(body.id   || '').trim();
+  var user = String(body.user || '').trim();
   if (!id) throw new Error('Не указан ID чек-листа');
 
   var ss    = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(CHK_INT_SHEET);
   if (!sheet || sheet.getLastRow() < 2) throw new Error('Лист «Чек листы_внутренние» пуст');
+  ensureIntHeaders_(sheet);
 
   var n    = sheet.getLastRow() - 1;
-  var idA  = sheet.getRange(2, 1, n, 1).getValues();  // столбец A (ID группы)
-  var fCol = sheet.getRange(2, 6, n, 1).getValues();  // столбец F (Статус)
+  var idA  = sheet.getRange(2, 1, n, 1).getValues();   // столбец A (ID группы)
+  var fCol = sheet.getRange(2, 6, n, 1).getValues();   // столбец F (Статус)
+  var mCol = sheet.getRange(2, 13, n, 1).getValues();  // столбец M (Изменено)
+  var mark = changeMark_(user, 'удалил');
   var updated = 0;
   for (var i = 0; i < n; i++) {
-    if (String(idA[i][0]).trim() === id) { fCol[i][0] = 'Удалён'; updated++; }
+    if (String(idA[i][0]).trim() === id) { fCol[i][0] = 'Удалён'; mCol[i][0] = mark; updated++; }
   }
   if (!updated) throw new Error('Чек-лист не найден: ' + id);
   sheet.getRange(2, 6, n, 1).setValues(fCol);
+  sheet.getRange(2, 13, n, 1).setValues(mCol);
   SpreadsheetApp.flush();
   return { ok: true, updated: updated };
 }
 
 function createInternalSheet(ss) {
   var sh = ss.insertSheet(CHK_INT_SHEET);
-  sh.getRange(1, 1, 1, 10).setValues([[
-    'ID', 'Дата', 'Корпус', 'ID_работы', 'Этаж', 'Статус', 'Ссылка', 'Файл', 'Комментарий', 'Номер'
+  sh.getRange(1, 1, 1, 13).setValues([[
+    'ID', 'Дата', 'Корпус', 'ID_работы', 'Этаж', 'Статус', 'Ссылка', 'Файл', 'Комментарий', 'Номер',
+    'Доп файлы', 'Загрузил', 'Изменено'
   ]]);
   sh.setFrozenRows(1);
   return sh;
