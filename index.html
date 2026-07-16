@@ -362,6 +362,12 @@ body.chk-open .board-wrap { margin-right: 324px; }
 #addbar.hide { display: none; }
 #addbar-info { font-size: 13px; }
 #addbar .btn { padding: 6px 14px; }
+/* Главная кнопка панели — яркая, иначе сливается с синим фоном */
+#addbar-up {
+  background: #ff9800; border-color: #ff9800; color: #fff; font-weight: 700;
+}
+#addbar-up:hover:not([disabled]) { background: #f57c00; border-color: #f57c00; }
+#addbar-up[disabled] { opacity: .45; cursor: default; }
 #addbar-edit { display: flex; gap: 6px; align-items: center; }
 #addbar-edit.hide { display: none; }
 .ab-inp {
