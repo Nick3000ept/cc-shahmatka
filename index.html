@@ -132,7 +132,12 @@ td.cell.c-st-green  { box-shadow: inset 0 0 0 3px #1b5e20; } /* Принято *
 td.cell.c-chk-hl { box-shadow: inset 0 0 0 3px #2196f3; }
 td.rh.rh-hl      { background: #bbdefb; }
 td.cell.c-sel   { box-shadow: inset 0 0 0 3px #ff9800; }
+/* В режиме добавления/правки выделение — сплошная заливка, чтобы не терялось среди окантовок */
+body.add-mode td.cell.c-sel { background: #ff9800; color: #fff; box-shadow: inset 0 0 0 3px #e65100; }
 body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
+/* Подсветка работ в шапке: оранжевая — работы выделения (правка/создание), синяя — чек-листа из панели */
+#board thead th.h-work.hl-sel { background: #ff9800; color: #fff; }
+#board thead th.h-work.hl-chk { background: #2196f3; color: #fff; }
 #add-chk-btn.on { background: #ff9800; color: #fff; border-color: #ff9800; }
 
 
@@ -1069,6 +1074,29 @@ function buildHeaders(cols) {
     { key: 'lokacia',  cls: 'h-lokacia'  },
     { key: 'nameGrid', cls: 'h-work'     },
   ];
+  // Подсветка работ в шапке: выделение (правка/создание) — оранжевым, чек-лист из панели — синим
+  var selWorks = null, chkWorks = null;
+  if (ADD_MODE) {
+    selWorks = {};
+    for (var sk in SELECTED) {
+      var sp2 = sk.split('\x00');
+      selWorks[sp2[0] + '\x00' + sp2[1]] = true;
+    }
+  }
+  if (SEL_CHK) {
+    chkWorks = {};
+    for (var ck in CHECK_BY_CELL) {
+      var recs = CHECK_BY_CELL[ck];
+      for (var ri = 0; ri < recs.length; ri++) {
+        if (String(recs[ri].id) === String(SEL_CHK)) {
+          var cp = ck.split('\x00');
+          chkWorks[cp[0] + '\x00' + cp[1]] = true;
+          break;
+        }
+      }
+    }
+  }
+
   var rows = '';
   levels.forEach(function (lvl, li) {
     rows += '<tr>';
@@ -1077,10 +1105,21 @@ function buildHeaders(cols) {
       rows += '<th class="rh h-corpus" rowspan="' + levels.length + '" style="top:0;left:0;z-index:25">Этаж</th>';
     }
     var spans = computeSpans(cols, levels.slice(0, li + 1).map(function (l) { return l.key; }));
+    var isWork = (li === levels.length - 1);
+    var idx = 0;
     spans.forEach(function (sp) {
       var attr = sp.span > 1 ? ' colspan="' + sp.span + '"' : '';
       var label = sp.label || '—';
-      rows += '<th class="' + lvl.cls + '"' + attr + ' title="' + e(label) + '">' + e(label) + '</th>';
+      var extra = '', wkAttr = '';
+      if (isWork) {
+        var col = cols[idx]; // уровень работ: span почти всегда 1
+        wkAttr = ' data-wk="' + e(col.workId + '|' + col.corpus) + '"';
+        var key = col.workId + '\x00' + col.corpus;
+        if (selWorks && selWorks[key]) extra = ' hl-sel';
+        else if (chkWorks && chkWorks[key]) extra = ' hl-chk';
+      }
+      idx += sp.span;
+      rows += '<th class="' + lvl.cls + extra + '"' + attr + wkAttr + ' title="' + e(label) + '">' + e(label) + '</th>';
     });
     rows += '</tr>';
   });
@@ -1900,7 +1939,19 @@ function toggleSelect(td) {
     td.classList.add('c-sel');
   }
   if (!EDIT_CHK && !Object.keys(SELECTED).length) ADD_CORPUS = '';
+  refreshWorkHl(workId, corpus);
   updateAddbar();
+}
+
+// Обновить подсветку работы в шапке после клика по ячейке (без полного перерендера)
+function refreshWorkHl(workId, corpus) {
+  var any = false;
+  for (var k in SELECTED) {
+    var p = k.split('\x00');
+    if (p[0] === workId && p[1] === corpus) { any = true; break; }
+  }
+  var ths = document.querySelectorAll('#board th[data-wk="' + workId + '|' + corpus + '"]');
+  for (var i = 0; i < ths.length; i++) ths[i].classList.toggle('hl-sel', any);
 }
 
 function updateAddbar() {
