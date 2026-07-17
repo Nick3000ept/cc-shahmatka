@@ -38,6 +38,23 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; f
 #sdot.err  { background: #f44336; }
 #sdot.spin { background: #ff9800; }
 
+/* ── SELBAR (теги работ выделения) ── */
+#selbar {
+  padding: 6px 12px; background: #fff3e0;
+  border-bottom: 1px solid #ffcc80;
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  font-size: 12px;
+}
+#selbar.hide { display: none; }
+.selbar-cap { color: #b26a00; font-weight: 600; margin-right: 2px; }
+.selbar-none { color: #b26a00; opacity: .7; }
+.sel-tag {
+  background: #ff9800; color: #fff;
+  border-radius: 12px; padding: 3px 10px;
+  cursor: pointer; user-select: none; white-space: nowrap;
+}
+.sel-tag:hover { background: #f57c00; }
+
 /* ── FILTERBAR ── */
 .filterbar {
   padding: 8px 12px; background: #fff;
@@ -467,6 +484,9 @@ body.chk-open .board-wrap { margin-right: 324px; }
   <div class="sync"><div id="sdot"></div><span id="stxt">загрузка…</span></div>
 </div>
 
+<!-- SELBAR: теги работ из выделенных ячеек (режим создания/правки чек-листа) -->
+<div id="selbar" class="hide"></div>
+
 <!-- FILTERBAR -->
 <div class="filterbar">
   <div id="fc"></div>
@@ -745,6 +765,11 @@ window.onload = function () {
     }
   };
   document.getElementById('cp-photo-inp').onchange = function () { uploadChecklistPhotos(this.files); };
+  // Теги выделения: клик по тегу убирает работу из выделения
+  document.getElementById('selbar').onclick = function (ev) {
+    var tag = ev.target.closest ? ev.target.closest('[data-unsel]') : null;
+    if (tag) removeWorkFromSelection(tag.dataset.unsel);
+  };
   // Аналитика: клик по строке системы раскрывает разбивку по корпусам
   document.getElementById('an-table').onclick = function (ev) {
     var tr = ev.target.closest ? ev.target.closest('tr.an-sysrow') : null;
@@ -1923,6 +1948,7 @@ function cancelAdd() {
   document.body.classList.remove('add-mode');
   document.getElementById('add-chk-btn').classList.remove('on');
   document.getElementById('addbar').classList.add('hide');
+  updateSelTags(); // спрятать панель тегов
   render();
 }
 
@@ -1987,6 +2013,46 @@ function updateAddbar() {
   }
   document.getElementById('addbar-edit').classList.toggle('hide', !EDIT_CHK);
   btn.disabled = !n;
+  updateSelTags();
+}
+
+// Теги работ из выделенных ячеек (панель под топбаром в режиме создания/правки)
+function updateSelTags() {
+  var bar = document.getElementById('selbar');
+  if (!ADD_MODE) { bar.classList.add('hide'); bar.innerHTML = ''; return; }
+  var byWork = {}; // workId → число выделенных ячеек
+  for (var k in SELECTED) {
+    var wid = SELECTED[k].workId;
+    byWork[wid] = (byWork[wid] || 0) + 1;
+  }
+  var ids = Object.keys(byWork).sort(function (a, b) {
+    var wa = WORKS_MAP[a] || {}, wb = WORKS_MAP[b] || {};
+    return naturalSort((wa.sistema || '') + ' ' + (wa.nameGrid || ''), (wb.sistema || '') + ' ' + (wb.nameGrid || ''));
+  });
+  var html = '<span class="selbar-cap">Работы в выделении:</span>';
+  if (!ids.length) {
+    html += '<span class="selbar-none">пока пусто — кликайте по ячейкам</span>';
+  } else {
+    html += ids.map(function (id) {
+      var w = WORKS_MAP[id] || {};
+      var label = (w.sistema ? w.sistema + ' · ' : '') + (w.nameGrid || w.work || id);
+      var cnt = byWork[id] > 1 ? ' ×' + byWork[id] : '';
+      return '<span class="sel-tag" data-unsel="' + e(id) + '" title="Убрать эту работу из выделения">' +
+             e(label) + cnt + ' ✕</span>';
+    }).join('');
+  }
+  bar.innerHTML = html;
+  bar.classList.remove('hide');
+}
+
+// Клик по тегу — убрать все ячейки этой работы из выделения
+function removeWorkFromSelection(workId) {
+  for (var k in SELECTED) {
+    if (SELECTED[k].workId === workId) delete SELECTED[k];
+  }
+  if (!EDIT_CHK && !Object.keys(SELECTED).length) ADD_CORPUS = '';
+  updateAddbar();
+  render();
 }
 
 function openUpload() {
