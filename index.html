@@ -291,14 +291,20 @@ body.chk-open .board-wrap { margin-right: 324px; }
 .an-table th:first-child { text-align: left; }
 .an-table td { padding: 7px 8px; text-align: right; border-bottom: 1px solid #f3f3f3; white-space: nowrap; }
 .an-table td:first-child { text-align: left; }
-.an-sysrow { cursor: pointer; font-weight: 600; }
-.an-sysrow:hover { background: #f7faff; }
-.an-sysrow td:first-child:before { content: '▸ '; color: #888; }
-.an-sysrow.open td:first-child:before { content: '▾ '; }
+.an-sysrow { font-weight: 600; }
+.an-table tr[data-tgl] { cursor: pointer; }
+.an-table tr[data-tgl]:hover { background: #f7faff; }
+.an-table tr[data-tgl] td:first-child:before { content: '▸ '; color: #888; }
+.an-table tr[data-tgl].open td:first-child:before { content: '▾ '; }
 .an-sub { display: none; background: #fafbfd; }
 .an-sub.show { display: table-row; }
 .an-sub td:first-child { padding-left: 28px; color: #555; }
+.an-sub2 { display: none; background: #f4f7fb; }
+.an-sub2.show { display: table-row; }
+.an-sub2 td:first-child { padding-left: 48px; color: #666; }
 .an-total td { font-weight: 700; border-top: 2px solid #dde4ef; border-bottom: none; }
+.an-tab { font-size: 12px; padding: 4px 10px; }
+.an-tab.active { background: #1a3a6b; color: #fff; border-color: #1a3a6b; }
 
 /* ── PASSWORD / NAME MODAL ── */
 #pwd-overlay, #nm-overlay {
@@ -479,7 +485,7 @@ body.chk-open .board-wrap { margin-right: 324px; }
   <label class="chk-toggle" title="Показать количество чек-листов в ячейках">
     <input type="checkbox" id="chk-mode" onchange="toggleCheckMode()"> 📋 Чек листы</label>
   <button class="btn" id="add-chk-btn" onclick="toggleAddMode()" title="Загрузить новый чек-лист">+ Чек-лист</button>
-  <button class="btn" onclick="openAnalytics('fact')" title="Сводка готовых работ по системам и корпусам">📊 Аналитика физика</button>
+  <button class="btn" style="margin-left:auto" onclick="openAnalytics('fact')" title="Сводка готовых работ по системам и корпусам">📊 Аналитика физика</button>
   <button class="btn" onclick="openAnalytics('chk')" title="Сводка приложенных чек-листов по системам и корпусам">📊 Аналитика чек-листы</button>
   <div class="sync"><div id="sdot"></div><span id="stxt">загрузка…</span></div>
 </div>
@@ -667,7 +673,11 @@ body.chk-open .board-wrap { margin-right: 324px; }
       <h3 id="an-title">Аналитика</h3>
       <button id="an-x" onclick="closeAnalytics()">✕</button>
     </div>
-    <div id="an-hint">Клик по системе — разбивка по корпусам</div>
+    <div id="an-hint">
+      <button class="btn an-tab active" data-v="sys" onclick="anView('sys')">По системам</button>
+      <button class="btn an-tab" data-v="month" onclick="anView('month')">По месяцам</button>
+      <span style="margin-left:8px">клик по строке — раскрытие</span>
+    </div>
     <div id="an-body-wrap"><table class="an-table" id="an-table"></table></div>
   </div>
 </div>
@@ -770,13 +780,23 @@ window.onload = function () {
     var tag = ev.target.closest ? ev.target.closest('[data-unsel]') : null;
     if (tag) removeWorkFromSelection(tag.dataset.unsel);
   };
-  // Аналитика: клик по строке системы раскрывает разбивку по корпусам
+  // Аналитика: клик по строке раскрывает вложенный уровень (месяц → система → корпус)
   document.getElementById('an-table').onclick = function (ev) {
-    var tr = ev.target.closest ? ev.target.closest('tr.an-sysrow') : null;
+    var tr = ev.target.closest ? ev.target.closest('tr[data-tgl]') : null;
     if (!tr) return;
-    tr.classList.toggle('open');
-    var subs = document.querySelectorAll('#an-table tr.an-sub[data-i="' + tr.dataset.i + '"]');
-    for (var i = 0; i < subs.length; i++) subs[i].classList.toggle('show');
+    var id   = tr.dataset.tgl;
+    var open = tr.classList.toggle('open');
+    var rows = document.querySelectorAll('#an-table tr[data-grp]');
+    for (var i = 0; i < rows.length; i++) {
+      var g = rows[i].dataset.grp;
+      if (open) {
+        if (g === id) rows[i].classList.add('show');
+      } else if (g === id || g.indexOf(id + '.') === 0) {
+        // закрытие уровня прячет и все вложенные
+        rows[i].classList.remove('show');
+        rows[i].classList.remove('open');
+      }
+    }
   };
   window.addEventListener('resize', function () { if (CHECK_MODE) positionChkPanel(); });
   loadData();
@@ -1257,18 +1277,50 @@ function updateStats(s) {
   document.getElementById('sb-pct').textContent   = pct;
 }
 
-// ─── АНАЛИТИКА (сводка по системам, раскрытие по корпусам) ──────────────────
+// ─── АНАЛИТИКА (сводки: по системам с корпусами, по месяцам) ────────────────
+var AN_MODE = 'fact'; // fact — физика | chk — чек-листы
+var AN_VIEW = 'sys';  // sys — система→корпус | month — месяц→система→корпус
+
 function openAnalytics(mode) {
   if (mode === 'chk' && !CHECKS_LOADED) { toast('Чек-листы ещё загружаются — попробуйте через минуту', 'inf'); return; }
   if (!WORKS.length) { toast('Данные ещё загружаются', 'inf'); return; }
+  AN_MODE = mode;
   document.getElementById('an-title').textContent =
     mode === 'chk' ? 'Аналитика · чек-листы' : 'Аналитика · физика (готовые работы)';
-  renderAnalytics(mode);
+  anView(AN_VIEW);
   document.getElementById('an-overlay').classList.remove('hide');
+}
+
+function anView(v) {
+  AN_VIEW = v;
+  var tabs = document.querySelectorAll('.an-tab');
+  for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].dataset.v === v);
+  renderAnalytics();
 }
 
 function closeAnalytics() {
   document.getElementById('an-overlay').classList.add('hide');
+}
+
+// Месяц из даты dd.MM.yyyy → ключ "yyyy-MM" (пусто, если дата не распозналась)
+function monthKey(d) {
+  var m = String(d || '').match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  return m ? m[3] + '-' + m[2] : '';
+}
+var MONTHS_RU = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+                 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
+function monthLabel(key) {
+  if (!key) return 'Без даты';
+  var p = key.split('-');
+  return MONTHS_RU[parseInt(p[1], 10) - 1] + ' ' + p[0];
+}
+// Месяцы по убыванию, «Без даты» — в конец
+function monthKeysSorted(months) {
+  return Object.keys(months).sort(function (a, b) {
+    if (!a) return 1;
+    if (!b) return -1;
+    return a < b ? 1 : -1;
+  });
 }
 
 // Физика: по каждой системе — готово/всего позиций (и то же по корпусам)
@@ -1304,46 +1356,139 @@ function anChkData() {
   return sys;
 }
 
-function renderAnalytics(mode) {
-  var html, names, totalRow;
-  if (mode === 'chk') {
-    var d = anChkData();
-    names = Object.keys(d).sort(naturalSort);
-    html = '<tr><th>Система</th><th>Чек-листов</th><th>Ячеек</th></tr>';
-    var tIds = {}, tCells = 0;
-    names.forEach(function (s, i) {
-      var S = d[s];
-      var nIds = Object.keys(S.ids).length;
-      tCells += S.cells;
-      for (var id in S.ids) tIds[id] = true;
-      html += '<tr class="an-sysrow" data-i="' + i + '"><td>' + e(s) + '</td><td>' + nIds + '</td><td>' + S.cells + '</td></tr>';
+// Физика по месяцам (по дате готовности): месяц → система → корпус, только готовые
+function anFactMonths() {
+  var months = {};
+  FACTS.forEach(function (f) {
+    var isDone = f.status === 'СМР окончены' || f.pct === '100' || f.pct === 'true' || f.pct === 'TRUE';
+    if (!isDone) return;
+    var mk = monthKey(f.date);
+    var s  = (WORKS_MAP[f.workId] || {}).sistema || '—';
+    var c  = (FLOOR_MAP[f.floorId] || {}).corpus || '—';
+    var M = months[mk] = months[mk] || { done: 0, sys: {} };
+    var S = M.sys[s] = M.sys[s] || { done: 0, corp: {} };
+    M.done++; S.done++;
+    S.corp[c] = (S.corp[c] || 0) + 1;
+  });
+  return months;
+}
+
+// Чек-листы по месяцам (по дате чек-листа): месяц → система → корпус
+function anChkMonths() {
+  var months = {};
+  for (var k in CHECK_BY_CELL) {
+    var p = k.split('\x00');
+    var s = (WORKS_MAP[p[0]] || {}).sistema || '—';
+    CHECK_BY_CELL[k].forEach(function (r) {
+      var mk = monthKey(r.date);
+      var M = months[mk] = months[mk] || { cells: 0, ids: {}, sys: {} };
+      var S = M.sys[s] = M.sys[s] || { cells: 0, ids: {}, corp: {} };
+      var C = S.corp[p[1]] = S.corp[p[1]] || { cells: 0, ids: {} };
+      M.cells++; S.cells++; C.cells++;
+      M.ids[r.id] = true; S.ids[r.id] = true; C.ids[r.id] = true;
+    });
+  }
+  return months;
+}
+
+function renderAnalytics() {
+  var html;
+  if (AN_VIEW === 'month') html = (AN_MODE === 'chk') ? renderChkMonths() : renderFactMonths();
+  else                     html = (AN_MODE === 'chk') ? renderChkSys()    : renderFactSys();
+  document.getElementById('an-table').innerHTML = html;
+}
+
+function renderFactSys() {
+  var d = anFactData();
+  var names = Object.keys(d).sort(naturalSort);
+  var html = '<tr><th>Система</th><th>Готово</th><th>Всего</th><th>%</th></tr>';
+  var td = 0, tt = 0;
+  names.forEach(function (s, i) {
+    var S = d[s];
+    td += S.done; tt += S.total;
+    html += '<tr class="an-sysrow" data-tgl="s' + i + '"><td>' + e(s) + '</td><td>' + S.done +
+            '</td><td>' + S.total + '</td><td>' + pct_(S.done, S.total) + '</td></tr>';
+    Object.keys(S.corp).sort(naturalSort).forEach(function (c) {
+      var C = S.corp[c];
+      html += '<tr class="an-sub" data-grp="s' + i + '"><td>' + e(c) + '</td><td>' + C.done +
+              '</td><td>' + C.total + '</td><td>' + pct_(C.done, C.total) + '</td></tr>';
+    });
+  });
+  html += '<tr class="an-total"><td>Всего</td><td>' + td + '</td><td>' + tt + '</td><td>' + pct_(td, tt) + '</td></tr>';
+  return html;
+}
+
+function renderChkSys() {
+  var d = anChkData();
+  var names = Object.keys(d).sort(naturalSort);
+  if (!names.length) return '<tr><td style="color:#aaa">Чек-листов пока нет</td></tr>';
+  var html = '<tr><th>Система</th><th>Чек-листов</th><th>Ячеек</th></tr>';
+  var tIds = {}, tCells = 0;
+  names.forEach(function (s, i) {
+    var S = d[s];
+    tCells += S.cells;
+    for (var id in S.ids) tIds[id] = true;
+    html += '<tr class="an-sysrow" data-tgl="s' + i + '"><td>' + e(s) + '</td><td>' +
+            Object.keys(S.ids).length + '</td><td>' + S.cells + '</td></tr>';
+    Object.keys(S.corp).sort(naturalSort).forEach(function (c) {
+      var C = S.corp[c];
+      html += '<tr class="an-sub" data-grp="s' + i + '"><td>' + e(c) + '</td><td>' +
+              Object.keys(C.ids).length + '</td><td>' + C.cells + '</td></tr>';
+    });
+  });
+  html += '<tr class="an-total"><td>Всего</td><td>' + Object.keys(tIds).length + '</td><td>' + tCells + '</td></tr>';
+  return html;
+}
+
+function renderFactMonths() {
+  var months = anFactMonths();
+  var mks = monthKeysSorted(months);
+  if (!mks.length) return '<tr><td style="color:#aaa">Готовых работ пока нет</td></tr>';
+  var html = '<tr><th>Месяц</th><th>Готово</th></tr>';
+  var tot = 0;
+  mks.forEach(function (mk, mi) {
+    var M = months[mk];
+    tot += M.done;
+    html += '<tr class="an-sysrow" data-tgl="m' + mi + '"><td>' + e(monthLabel(mk)) + '</td><td>' + M.done + '</td></tr>';
+    Object.keys(M.sys).sort(naturalSort).forEach(function (s, si) {
+      var S = M.sys[s];
+      var sid = 'm' + mi + '.s' + si;
+      html += '<tr class="an-sub" data-grp="m' + mi + '" data-tgl="' + sid + '"><td>' + e(s) + '</td><td>' + S.done + '</td></tr>';
+      Object.keys(S.corp).sort(naturalSort).forEach(function (c) {
+        html += '<tr class="an-sub2" data-grp="' + sid + '"><td>' + e(c) + '</td><td>' + S.corp[c] + '</td></tr>';
+      });
+    });
+  });
+  html += '<tr class="an-total"><td>Всего</td><td>' + tot + '</td></tr>';
+  return html;
+}
+
+function renderChkMonths() {
+  var months = anChkMonths();
+  var mks = monthKeysSorted(months);
+  if (!mks.length) return '<tr><td style="color:#aaa">Чек-листов пока нет</td></tr>';
+  var html = '<tr><th>Месяц</th><th>Чек-листов</th><th>Ячеек</th></tr>';
+  var tIds = {}, tCells = 0;
+  mks.forEach(function (mk, mi) {
+    var M = months[mk];
+    tCells += M.cells;
+    for (var id in M.ids) tIds[id] = true;
+    html += '<tr class="an-sysrow" data-tgl="m' + mi + '"><td>' + e(monthLabel(mk)) + '</td><td>' +
+            Object.keys(M.ids).length + '</td><td>' + M.cells + '</td></tr>';
+    Object.keys(M.sys).sort(naturalSort).forEach(function (s, si) {
+      var S = M.sys[s];
+      var sid = 'm' + mi + '.s' + si;
+      html += '<tr class="an-sub" data-grp="m' + mi + '" data-tgl="' + sid + '"><td>' + e(s) + '</td><td>' +
+              Object.keys(S.ids).length + '</td><td>' + S.cells + '</td></tr>';
       Object.keys(S.corp).sort(naturalSort).forEach(function (c) {
         var C = S.corp[c];
-        html += '<tr class="an-sub" data-i="' + i + '"><td>' + e(c) + '</td><td>' +
+        html += '<tr class="an-sub2" data-grp="' + sid + '"><td>' + e(c) + '</td><td>' +
                 Object.keys(C.ids).length + '</td><td>' + C.cells + '</td></tr>';
       });
     });
-    html += '<tr class="an-total"><td>Всего</td><td>' + Object.keys(tIds).length + '</td><td>' + tCells + '</td></tr>';
-    if (!names.length) html = '<tr><td style="color:#aaa">Чек-листов пока нет</td></tr>';
-  } else {
-    var df = anFactData();
-    names = Object.keys(df).sort(naturalSort);
-    html = '<tr><th>Система</th><th>Готово</th><th>Всего</th><th>%</th></tr>';
-    var td = 0, tt = 0;
-    names.forEach(function (s, i) {
-      var S = df[s];
-      td += S.done; tt += S.total;
-      html += '<tr class="an-sysrow" data-i="' + i + '"><td>' + e(s) + '</td><td>' + S.done +
-              '</td><td>' + S.total + '</td><td>' + pct_(S.done, S.total) + '</td></tr>';
-      Object.keys(S.corp).sort(naturalSort).forEach(function (c) {
-        var C = S.corp[c];
-        html += '<tr class="an-sub" data-i="' + i + '"><td>' + e(c) + '</td><td>' + C.done +
-                '</td><td>' + C.total + '</td><td>' + pct_(C.done, C.total) + '</td></tr>';
-      });
-    });
-    html += '<tr class="an-total"><td>Всего</td><td>' + td + '</td><td>' + tt + '</td><td>' + pct_(td, tt) + '</td></tr>';
-  }
-  document.getElementById('an-table').innerHTML = html;
+  });
+  html += '<tr class="an-total"><td>Всего</td><td>' + Object.keys(tIds).length + '</td><td>' + tCells + '</td></tr>';
+  return html;
 }
 
 function pct_(done, total) {
