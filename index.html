@@ -131,6 +131,8 @@ td.cell.c-st-green  { box-shadow: inset 0 0 0 3px #1b5e20; } /* Принято *
 /* Подсветка ячеек выбранного в панели чек-листа */
 td.cell.c-chk-hl { box-shadow: inset 0 0 0 3px #2196f3; }
 td.rh.rh-hl      { background: #bbdefb; }
+/* Этажи с выделенными ячейками (создание/правка чек-листа) */
+td.rh.rh-sel     { background: #ff9800; color: #fff; }
 td.cell.c-sel   { box-shadow: inset 0 0 0 3px #ff9800; }
 /* В режиме добавления/правки выделение — сплошная заливка, чтобы не терялось среди окантовок */
 body.add-mode td.cell.c-sel { background: #ff9800; color: #fff; box-shadow: inset 0 0 0 3px #e65100; }
@@ -1143,11 +1145,18 @@ function computeSpans(cols, keyPath) {
 
 function buildBody(cols, floorNums) {
   var html = '';
-  // Этажи выбранного в панели чек-листа — для подсветки заголовков строк
+  // Этажи выбранного в панели чек-листа (синие) и выделения при создании/правке (оранжевые)
   var selFloors = SEL_CHK ? chkFloorSet(SEL_CHK) : null;
+  var addFloors = null;
+  if (ADD_MODE) {
+    addFloors = {};
+    for (var sk in SELECTED) addFloors[String(SELECTED[sk].floor)] = true;
+  }
   floorNums.forEach(function (floorNum) {
-    var rhCls = (selFloors && selFloors[String(floorNum)]) ? ' rh-hl' : '';
-    html += '<tr><td class="rh' + rhCls + '">' + floorNum + '</td>';
+    var rhCls = '';
+    if (selFloors && selFloors[String(floorNum)]) rhCls += ' rh-hl';
+    if (addFloors && addFloors[String(floorNum)]) rhCls += ' rh-sel';
+    html += '<tr><td class="rh' + rhCls + '" data-floor="' + floorNum + '">' + floorNum + '</td>';
     cols.forEach(function (col) {
       var floorId = FLOOR_BY_KEY[floorKey(col.corpus, col.pod, floorNum)];
       if (!floorId) {
@@ -1940,7 +1949,18 @@ function toggleSelect(td) {
   }
   if (!EDIT_CHK && !Object.keys(SELECTED).length) ADD_CORPUS = '';
   refreshWorkHl(workId, corpus);
+  refreshFloorHl(floor);
   updateAddbar();
+}
+
+// Обновить подсветку этажа слева после клика по ячейке (без полного перерендера)
+function refreshFloorHl(floor) {
+  var any = false;
+  for (var k in SELECTED) {
+    if (String(SELECTED[k].floor) === String(floor)) { any = true; break; }
+  }
+  var el = document.querySelector('#board td.rh[data-floor="' + floor + '"]');
+  if (el) el.classList.toggle('rh-sel', any);
 }
 
 // Обновить подсветку работы в шапке после клика по ячейке (без полного перерендера)
