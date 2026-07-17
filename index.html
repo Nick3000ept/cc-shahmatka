@@ -242,6 +242,40 @@ body.chk-open .board-wrap { margin-right: 324px; }
 .toast.inf { background: #2196f3; }
 @keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; } }
 
+/* ── ANALYTICS MODAL (сводка по системам) ── */
+#an-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 580; padding: 16px;
+}
+#an-overlay.hide { display: none; }
+#an-box {
+  background: #fff; border-radius: 12px; width: 540px; max-width: 100%;
+  max-height: 85vh; display: flex; flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0,0,0,.22); overflow: hidden;
+}
+#an-head { background: #1a3a6b; color: #fff; padding: 14px 20px; display: flex; align-items: center; }
+#an-head h3 { font-size: 16px; font-weight: 700; }
+#an-x { margin-left: auto; background: none; border: none; color: #fff; font-size: 20px; cursor: pointer; }
+#an-hint { padding: 8px 20px; font-size: 12px; color: #888; border-bottom: 1px solid #eee; }
+#an-body-wrap { overflow-y: auto; padding: 8px 20px 16px; }
+.an-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.an-table th {
+  text-align: right; font-size: 11px; color: #888; font-weight: 600;
+  padding: 8px 8px 6px; border-bottom: 1px solid #e4e8f0; white-space: nowrap;
+}
+.an-table th:first-child { text-align: left; }
+.an-table td { padding: 7px 8px; text-align: right; border-bottom: 1px solid #f3f3f3; white-space: nowrap; }
+.an-table td:first-child { text-align: left; }
+.an-sysrow { cursor: pointer; font-weight: 600; }
+.an-sysrow:hover { background: #f7faff; }
+.an-sysrow td:first-child:before { content: '▸ '; color: #888; }
+.an-sysrow.open td:first-child:before { content: '▾ '; }
+.an-sub { display: none; background: #fafbfd; }
+.an-sub.show { display: table-row; }
+.an-sub td:first-child { padding-left: 28px; color: #555; }
+.an-total td { font-weight: 700; border-top: 2px solid #dde4ef; border-bottom: none; }
+
 /* ── PASSWORD / NAME MODAL ── */
 #pwd-overlay, #nm-overlay {
   position: fixed; inset: 0;
@@ -421,6 +455,8 @@ body.chk-open .board-wrap { margin-right: 324px; }
   <label class="chk-toggle" title="Показать количество чек-листов в ячейках">
     <input type="checkbox" id="chk-mode" onchange="toggleCheckMode()"> 📋 Чек листы</label>
   <button class="btn" id="add-chk-btn" onclick="toggleAddMode()" title="Загрузить новый чек-лист">+ Чек-лист</button>
+  <button class="btn" onclick="openAnalytics('fact')" title="Сводка готовых работ по системам и корпусам">📊 Аналитика физика</button>
+  <button class="btn" onclick="openAnalytics('chk')" title="Сводка приложенных чек-листов по системам и корпусам">📊 Аналитика чек-листы</button>
   <div class="sync"><div id="sdot"></div><span id="stxt">загрузка…</span></div>
 </div>
 
@@ -597,6 +633,18 @@ body.chk-open .board-wrap { margin-right: 324px; }
   </div>
 </div>
 
+<!-- ANALYTICS MODAL (сводка по системам) -->
+<div id="an-overlay" class="hide" onclick="if(event.target===this)closeAnalytics()">
+  <div id="an-box">
+    <div id="an-head">
+      <h3 id="an-title">Аналитика</h3>
+      <button id="an-x" onclick="closeAnalytics()">✕</button>
+    </div>
+    <div id="an-hint">Клик по системе — разбивка по корпусам</div>
+    <div id="an-body-wrap"><table class="an-table" id="an-table"></table></div>
+  </div>
+</div>
+
 <!-- NAME MODAL (обязательное имя для истории изменений) -->
 <div id="nm-overlay" class="hide">
   <div id="nm-box">
@@ -690,6 +738,14 @@ window.onload = function () {
     }
   };
   document.getElementById('cp-photo-inp').onchange = function () { uploadChecklistPhotos(this.files); };
+  // Аналитика: клик по строке системы раскрывает разбивку по корпусам
+  document.getElementById('an-table').onclick = function (ev) {
+    var tr = ev.target.closest ? ev.target.closest('tr.an-sysrow') : null;
+    if (!tr) return;
+    tr.classList.toggle('open');
+    var subs = document.querySelectorAll('#an-table tr.an-sub[data-i="' + tr.dataset.i + '"]');
+    for (var i = 0; i < subs.length; i++) subs[i].classList.toggle('show');
+  };
   window.addEventListener('resize', function () { if (CHECK_MODE) positionChkPanel(); });
   loadData();
 };
@@ -1126,6 +1182,99 @@ function updateStats(s) {
   document.getElementById('sb-total').textContent = s.total;
   document.getElementById('sb-done').textContent  = s.done;
   document.getElementById('sb-pct').textContent   = pct;
+}
+
+// ─── АНАЛИТИКА (сводка по системам, раскрытие по корпусам) ──────────────────
+function openAnalytics(mode) {
+  if (mode === 'chk' && !CHECKS_LOADED) { toast('Чек-листы ещё загружаются — попробуйте через минуту', 'inf'); return; }
+  if (!WORKS.length) { toast('Данные ещё загружаются', 'inf'); return; }
+  document.getElementById('an-title').textContent =
+    mode === 'chk' ? 'Аналитика · чек-листы' : 'Аналитика · физика (готовые работы)';
+  renderAnalytics(mode);
+  document.getElementById('an-overlay').classList.remove('hide');
+}
+
+function closeAnalytics() {
+  document.getElementById('an-overlay').classList.add('hide');
+}
+
+// Физика: по каждой системе — готово/всего позиций (и то же по корпусам)
+function anFactData() {
+  var sys = {};
+  FLOORS.forEach(function (f) {
+    WORKS.forEach(function (w) {
+      var s = w.sistema || '—';
+      var S = sys[s] = sys[s] || { done: 0, total: 0, corp: {} };
+      var C = S.corp[f.corpus] = S.corp[f.corpus] || { done: 0, total: 0 };
+      S.total++; C.total++;
+      var fact = FACT_MAP[w.workId + '_' + f.floorId];
+      if (fact && (fact.status === 'СМР окончены' || fact.pct === '100' || fact.pct === 'true' || fact.pct === 'TRUE')) {
+        S.done++; C.done++;
+      }
+    });
+  });
+  return sys;
+}
+
+// Чек-листы: по каждой системе — число чек-листов (уникальные id) и охваченных ячеек
+function anChkData() {
+  var sys = {};
+  for (var k in CHECK_BY_CELL) {
+    var p = k.split('\x00'); // [workId, corpus, floor]
+    var w = WORKS_MAP[p[0]] || {};
+    var s = w.sistema || '—';
+    var S = sys[s] = sys[s] || { cells: 0, ids: {}, corp: {} };
+    var C = S.corp[p[1]] = S.corp[p[1]] || { cells: 0, ids: {} };
+    S.cells++; C.cells++;
+    CHECK_BY_CELL[k].forEach(function (r) { S.ids[r.id] = true; C.ids[r.id] = true; });
+  }
+  return sys;
+}
+
+function renderAnalytics(mode) {
+  var html, names, totalRow;
+  if (mode === 'chk') {
+    var d = anChkData();
+    names = Object.keys(d).sort(naturalSort);
+    html = '<tr><th>Система</th><th>Чек-листов</th><th>Ячеек</th></tr>';
+    var tIds = {}, tCells = 0;
+    names.forEach(function (s, i) {
+      var S = d[s];
+      var nIds = Object.keys(S.ids).length;
+      tCells += S.cells;
+      for (var id in S.ids) tIds[id] = true;
+      html += '<tr class="an-sysrow" data-i="' + i + '"><td>' + e(s) + '</td><td>' + nIds + '</td><td>' + S.cells + '</td></tr>';
+      Object.keys(S.corp).sort(naturalSort).forEach(function (c) {
+        var C = S.corp[c];
+        html += '<tr class="an-sub" data-i="' + i + '"><td>' + e(c) + '</td><td>' +
+                Object.keys(C.ids).length + '</td><td>' + C.cells + '</td></tr>';
+      });
+    });
+    html += '<tr class="an-total"><td>Всего</td><td>' + Object.keys(tIds).length + '</td><td>' + tCells + '</td></tr>';
+    if (!names.length) html = '<tr><td style="color:#aaa">Чек-листов пока нет</td></tr>';
+  } else {
+    var df = anFactData();
+    names = Object.keys(df).sort(naturalSort);
+    html = '<tr><th>Система</th><th>Готово</th><th>Всего</th><th>%</th></tr>';
+    var td = 0, tt = 0;
+    names.forEach(function (s, i) {
+      var S = df[s];
+      td += S.done; tt += S.total;
+      html += '<tr class="an-sysrow" data-i="' + i + '"><td>' + e(s) + '</td><td>' + S.done +
+              '</td><td>' + S.total + '</td><td>' + pct_(S.done, S.total) + '</td></tr>';
+      Object.keys(S.corp).sort(naturalSort).forEach(function (c) {
+        var C = S.corp[c];
+        html += '<tr class="an-sub" data-i="' + i + '"><td>' + e(c) + '</td><td>' + C.done +
+                '</td><td>' + C.total + '</td><td>' + pct_(C.done, C.total) + '</td></tr>';
+      });
+    });
+    html += '<tr class="an-total"><td>Всего</td><td>' + td + '</td><td>' + tt + '</td><td>' + pct_(td, tt) + '</td></tr>';
+  }
+  document.getElementById('an-table').innerHTML = html;
+}
+
+function pct_(done, total) {
+  return total ? Math.round(done * 100 / total) + '%' : '—';
 }
 
 // ─── ЧЕК-ЛИСТЫ ────────────────────────────────────────────────────────────────
