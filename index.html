@@ -54,6 +54,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; f
   cursor: pointer; user-select: none; white-space: nowrap;
 }
 .sel-tag:hover { background: #f57c00; }
+/* Синий вариант панели — работы чек-листа, выбранного в правой панели */
+#selbar.chkview { background: #e3f2fd; border-color: #90caf9; }
+#selbar.chkview .selbar-cap { color: #1565c0; }
+.sel-tag-chk { background: #2196f3; cursor: default; }
+.sel-tag-chk:hover { background: #2196f3; }
 
 /* ── FILTERBAR ── */
 .filterbar {
@@ -1071,6 +1076,7 @@ function render() {
   var cols = getFilteredCols();
 
   if (CHECK_MODE) renderChkPanel(cols);
+  updateSelTags();
 
   // Только этажи корпусов, реально попавших в отфильтрованные колонки
   var corpusSet = {};
@@ -2161,33 +2167,64 @@ function updateAddbar() {
   updateSelTags();
 }
 
-// Теги работ из выделенных ячеек (панель под топбаром в режиме создания/правки)
+// Теги работ под топбаром: оранжевые — выделение (создание/правка),
+// синие — работы чек-листа, выбранного в правой панели
 function updateSelTags() {
   var bar = document.getElementById('selbar');
-  if (!ADD_MODE) { bar.classList.add('hide'); bar.innerHTML = ''; return; }
-  var byWork = {}; // workId → число выделенных ячеек
-  for (var k in SELECTED) {
-    var wid = SELECTED[k].workId;
-    byWork[wid] = (byWork[wid] || 0) + 1;
+
+  if (ADD_MODE) {
+    var byWork = {}; // workId → число выделенных ячеек
+    for (var k in SELECTED) {
+      var wid = SELECTED[k].workId;
+      byWork[wid] = (byWork[wid] || 0) + 1;
+    }
+    var ids = sortWorkIds(byWork);
+    var html = '<span class="selbar-cap">Работы в выделении:</span>';
+    if (!ids.length) {
+      html += '<span class="selbar-none">пока пусто — кликайте по ячейкам</span>';
+    } else {
+      html += ids.map(function (id) {
+        return '<span class="sel-tag" data-unsel="' + e(id) + '" title="Убрать эту работу из выделения">' +
+               e(workTagLabel(id)) + tagCnt(byWork[id]) + ' ✕</span>';
+      }).join('');
+    }
+    bar.innerHTML = html;
+    bar.classList.remove('chkview');
+    bar.classList.remove('hide');
+    return;
   }
-  var ids = Object.keys(byWork).sort(function (a, b) {
+
+  if (CHECK_MODE && SEL_CHK) {
+    var info = chkCells(SEL_CHK);
+    if (info) {
+      var byWork2 = {};
+      info.cells.forEach(function (c) { byWork2[c.workId] = (byWork2[c.workId] || 0) + 1; });
+      var ids2 = sortWorkIds(byWork2);
+      var num  = info.rec.number ? ' № ' + info.rec.number : '';
+      bar.innerHTML = '<span class="selbar-cap">Работы чек-листа' + e(num) + ':</span>' +
+        ids2.map(function (id) {
+          return '<span class="sel-tag sel-tag-chk">' + e(workTagLabel(id)) + tagCnt(byWork2[id]) + '</span>';
+        }).join('');
+      bar.classList.add('chkview');
+      bar.classList.remove('hide');
+      return;
+    }
+  }
+
+  bar.classList.add('hide');
+  bar.innerHTML = '';
+}
+
+function workTagLabel(id) {
+  var w = WORKS_MAP[id] || {};
+  return (w.sistema ? w.sistema + ' · ' : '') + (w.nameGrid || w.work || id);
+}
+function tagCnt(n) { return n > 1 ? ' ×' + n : ''; }
+function sortWorkIds(byWork) {
+  return Object.keys(byWork).sort(function (a, b) {
     var wa = WORKS_MAP[a] || {}, wb = WORKS_MAP[b] || {};
     return naturalSort((wa.sistema || '') + ' ' + (wa.nameGrid || ''), (wb.sistema || '') + ' ' + (wb.nameGrid || ''));
   });
-  var html = '<span class="selbar-cap">Работы в выделении:</span>';
-  if (!ids.length) {
-    html += '<span class="selbar-none">пока пусто — кликайте по ячейкам</span>';
-  } else {
-    html += ids.map(function (id) {
-      var w = WORKS_MAP[id] || {};
-      var label = (w.sistema ? w.sistema + ' · ' : '') + (w.nameGrid || w.work || id);
-      var cnt = byWork[id] > 1 ? ' ×' + byWork[id] : '';
-      return '<span class="sel-tag" data-unsel="' + e(id) + '" title="Убрать эту работу из выделения">' +
-             e(label) + cnt + ' ✕</span>';
-    }).join('');
-  }
-  bar.innerHTML = html;
-  bar.classList.remove('hide');
 }
 
 // Клик по тегу — убрать все ячейки этой работы из выделения
