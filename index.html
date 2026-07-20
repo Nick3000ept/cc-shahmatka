@@ -6,15 +6,19 @@
 <title>СС · Шахматка</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; background: #f0f2f5; color: #222; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px;
+  background: #f0f2f5; color: #222;
+  display: flex; flex-direction: column; /* шапка занимает столько, сколько нужно, доска — весь остаток */
+}
 
 /* ── TOPBAR ── */
 .topbar {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px; background: #fff;
   border-bottom: 1px solid #ddd;
-  position: sticky; top: 0; z-index: 200;
-  flex-wrap: wrap;
+  flex-wrap: wrap; flex-shrink: 0;
 }
 .topbar h1 { font-size: 15px; font-weight: 700; color: #1a3a6b; margin-right: 4px; }
 .btn {
@@ -43,6 +47,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; f
   padding: 6px 12px; background: #fff3e0;
   border-bottom: 1px solid #ffcc80;
   display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  flex-shrink: 0;
   font-size: 12px;
 }
 #selbar.hide { display: none; }
@@ -65,6 +70,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; f
   padding: 8px 12px; background: #fff;
   border-bottom: 1px solid #ddd;
   display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  flex-shrink: 0;
 }
 .filterbar label { font-size: 11px; color: #888; margin-right: 2px; white-space: nowrap; }
 #fc { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
@@ -86,12 +92,15 @@ select.fsel {
   border-bottom: 1px solid #ddd;
   font-size: 12px; color: #555;
   display: flex; gap: 16px; align-items: center;
+  flex-shrink: 0;
 }
 .statsbar b { color: #1a3a6b; }
 #sb-done { color: #4caf50 !important; }
 
 /* ── BOARD ── */
-.board-wrap { overflow: auto; padding: 12px; max-height: calc(100vh - 130px); }
+/* Доска — единственный скроллящийся блок: занимает весь остаток высоты после шапки,
+   какой бы та ни была (с тегами выделения или без) — высоту вручную не считаем. */
+.board-wrap { overflow: auto; padding: 12px; flex: 1 1 auto; min-height: 0; }
 #zoom-wrap { display: inline-block; }
 #board { border-collapse: collapse; white-space: nowrap; table-layout: fixed; }
 
