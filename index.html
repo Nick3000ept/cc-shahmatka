@@ -32,7 +32,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; f
 }
 .chk-toggle input { cursor: pointer; }
 #zoom-val { font-size: 12px; min-width: 36px; text-align: center; color: #555; }
-.sync { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #888; margin-left: auto; }
+.sync { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #888; margin-left: 4px; }
 #sdot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; flex-shrink: 0; }
 #sdot.ok   { background: #4caf50; }
 #sdot.err  { background: #f44336; }
@@ -279,7 +279,7 @@ body.chk-open .board-wrap { margin-right: 324px; }
 }
 #an-overlay.hide { display: none; }
 #an-box {
-  background: #fff; border-radius: 12px; width: 540px; max-width: 100%;
+  background: #fff; border-radius: 12px; width: 820px; max-width: 100%;
   max-height: 85vh; display: flex; flex-direction: column;
   box-shadow: 0 12px 40px rgba(0,0,0,.22); overflow: hidden;
 }
@@ -287,7 +287,7 @@ body.chk-open .board-wrap { margin-right: 324px; }
 #an-head h3 { font-size: 16px; font-weight: 700; }
 #an-x { margin-left: auto; background: none; border: none; color: #fff; font-size: 20px; cursor: pointer; }
 #an-hint { padding: 8px 20px; font-size: 12px; color: #888; border-bottom: 1px solid #eee; }
-#an-body-wrap { overflow-y: auto; padding: 8px 20px 16px; }
+#an-body-wrap { overflow: auto; padding: 8px 20px 16px; }
 .an-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .an-table th {
   text-align: right; font-size: 11px; color: #888; font-weight: 600;
@@ -304,12 +304,7 @@ body.chk-open .board-wrap { margin-right: 324px; }
 .an-sub { display: none; background: #fafbfd; }
 .an-sub.show { display: table-row; }
 .an-sub td:first-child { padding-left: 28px; color: #555; }
-.an-sub2 { display: none; background: #f4f7fb; }
-.an-sub2.show { display: table-row; }
-.an-sub2 td:first-child { padding-left: 48px; color: #666; }
 .an-total td { font-weight: 700; border-top: 2px solid #dde4ef; border-bottom: none; }
-.an-tab { font-size: 12px; padding: 4px 10px; }
-.an-tab.active { background: #1a3a6b; color: #fff; border-color: #1a3a6b; }
 
 /* ── PASSWORD / NAME MODAL ── */
 #pwd-overlay, #nm-overlay {
@@ -495,9 +490,6 @@ body.chk-open .board-wrap { margin-right: 324px; }
   <div class="sync"><div id="sdot"></div><span id="stxt">загрузка…</span></div>
 </div>
 
-<!-- SELBAR: теги работ из выделенных ячеек (режим создания/правки чек-листа) -->
-<div id="selbar" class="hide"></div>
-
 <!-- FILTERBAR -->
 <div class="filterbar">
   <div id="fc"></div>
@@ -513,6 +505,7 @@ body.chk-open .board-wrap { margin-right: 324px; }
     <select class="fsel" id="fwork" onchange="render()" style="max-width:200px"><option value="">Все</option></select></div>
   <div><label>Чек-лист №</label>
     <input class="fsel" id="fchknum" style="max-width:110px" placeholder="номер"
+      autocomplete="off" name="cc-chk-filter"
       oninput="render()" title="Показать только работы этого чек-листа"></div>
   <button class="btn" onclick="clearFilters()" style="margin-left:4px">✕ Сбросить</button>
 </div>
@@ -523,6 +516,9 @@ body.chk-open .board-wrap { margin-right: 324px; }
   <span>Готово: <b id="sb-done">—</b></span>
   <span>Готовность: <b id="sb-pct">—</b>%</span>
 </div>
+
+<!-- SELBAR: теги работ (выделение при создании/правке или выбранный чек-лист) -->
+<div id="selbar" class="hide"></div>
 
 <!-- BOARD -->
 <div class="board-wrap" id="board-wrap">
@@ -678,11 +674,7 @@ body.chk-open .board-wrap { margin-right: 324px; }
       <h3 id="an-title">Аналитика</h3>
       <button id="an-x" onclick="closeAnalytics()">✕</button>
     </div>
-    <div id="an-hint">
-      <button class="btn an-tab active" data-v="sys" onclick="anView('sys')">По системам</button>
-      <button class="btn an-tab" data-v="month" onclick="anView('month')">По месяцам</button>
-      <span style="margin-left:8px">клик по строке — раскрытие</span>
-    </div>
+    <div id="an-hint">Клик по системе — разбивка по корпусам; столбцы — месяцы</div>
     <div id="an-body-wrap"><table class="an-table" id="an-table"></table></div>
   </div>
 </div>
@@ -1283,9 +1275,8 @@ function updateStats(s) {
   document.getElementById('sb-pct').textContent   = pct;
 }
 
-// ─── АНАЛИТИКА (сводки: по системам с корпусами, по месяцам) ────────────────
+// ─── АНАЛИТИКА (сводная: строки — системы/корпуса, столбцы — месяцы) ────────
 var AN_MODE = 'fact'; // fact — физика | chk — чек-листы
-var AN_VIEW = 'sys';  // sys — система→корпус | month — месяц→система→корпус
 
 function openAnalytics(mode) {
   if (mode === 'chk' && !CHECKS_LOADED) { toast('Чек-листы ещё загружаются — попробуйте через минуту', 'inf'); return; }
@@ -1293,15 +1284,8 @@ function openAnalytics(mode) {
   AN_MODE = mode;
   document.getElementById('an-title').textContent =
     mode === 'chk' ? 'Аналитика · чек-листы' : 'Аналитика · физика (готовые работы)';
-  anView(AN_VIEW);
-  document.getElementById('an-overlay').classList.remove('hide');
-}
-
-function anView(v) {
-  AN_VIEW = v;
-  var tabs = document.querySelectorAll('.an-tab');
-  for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].dataset.v === v);
   renderAnalytics();
+  document.getElementById('an-overlay').classList.remove('hide');
 }
 
 function closeAnalytics() {
@@ -1313,187 +1297,126 @@ function monthKey(d) {
   var m = String(d || '').match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
   return m ? m[3] + '-' + m[2] : '';
 }
-var MONTHS_RU = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
-                 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
-function monthLabel(key) {
-  if (!key) return 'Без даты';
-  var p = key.split('-');
-  return MONTHS_RU[parseInt(p[1], 10) - 1] + ' ' + p[0];
+var MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+function monthShort(mk) {
+  if (!mk) return 'Без даты';
+  var p = mk.split('-');
+  return MONTHS_SHORT[parseInt(p[1], 10) - 1] + ' ' + p[0].slice(2);
 }
-// Месяцы по убыванию, «Без даты» — в конец
-function monthKeysSorted(months) {
-  return Object.keys(months).sort(function (a, b) {
+// Столбцы-месяцы по возрастанию, «Без даты» — в конец
+function monthCols(mset) {
+  return Object.keys(mset).sort(function (a, b) {
     if (!a) return 1;
     if (!b) return -1;
-    return a < b ? 1 : -1;
+    return a < b ? -1 : 1;
   });
 }
 
-// Физика: по каждой системе — готово/всего позиций (и то же по корпусам)
-function anFactData() {
-  var sys = {};
+// Физика: система → корпус, готово/всего + готовые по месяцам (дата готовности)
+function anFactPivot() {
+  var sys = {}, mset = {};
   FLOORS.forEach(function (f) {
     WORKS.forEach(function (w) {
       var s = w.sistema || '—';
-      var S = sys[s] = sys[s] || { done: 0, total: 0, corp: {} };
-      var C = S.corp[f.corpus] = S.corp[f.corpus] || { done: 0, total: 0 };
+      var S = sys[s] = sys[s] || { done: 0, total: 0, byM: {}, corp: {} };
+      var C = S.corp[f.corpus] = S.corp[f.corpus] || { done: 0, total: 0, byM: {} };
       S.total++; C.total++;
       var fact = FACT_MAP[w.workId + '_' + f.floorId];
       if (fact && (fact.status === 'СМР окончены' || fact.pct === '100' || fact.pct === 'true' || fact.pct === 'TRUE')) {
+        var mk = monthKey(fact.date);
+        mset[mk] = true;
         S.done++; C.done++;
+        S.byM[mk] = (S.byM[mk] || 0) + 1;
+        C.byM[mk] = (C.byM[mk] || 0) + 1;
       }
     });
   });
-  return sys;
+  return { sys: sys, months: monthCols(mset) };
 }
 
-// Чек-листы: по каждой системе — число чек-листов (уникальные id) и охваченных ячеек
-function anChkData() {
-  var sys = {};
+// Чек-листы: система → корпус, уникальные id всего и по месяцам (дата чек-листа)
+function anChkPivot() {
+  var sys = {}, mset = {};
   for (var k in CHECK_BY_CELL) {
     var p = k.split('\x00'); // [workId, corpus, floor]
-    var w = WORKS_MAP[p[0]] || {};
-    var s = w.sistema || '—';
-    var S = sys[s] = sys[s] || { cells: 0, ids: {}, corp: {} };
-    var C = S.corp[p[1]] = S.corp[p[1]] || { cells: 0, ids: {} };
-    S.cells++; C.cells++;
-    CHECK_BY_CELL[k].forEach(function (r) { S.ids[r.id] = true; C.ids[r.id] = true; });
-  }
-  return sys;
-}
-
-// Физика по месяцам (по дате готовности): месяц → система → корпус, только готовые
-function anFactMonths() {
-  var months = {};
-  FACTS.forEach(function (f) {
-    var isDone = f.status === 'СМР окончены' || f.pct === '100' || f.pct === 'true' || f.pct === 'TRUE';
-    if (!isDone) return;
-    var mk = monthKey(f.date);
-    var s  = (WORKS_MAP[f.workId] || {}).sistema || '—';
-    var c  = (FLOOR_MAP[f.floorId] || {}).corpus || '—';
-    var M = months[mk] = months[mk] || { done: 0, sys: {} };
-    var S = M.sys[s] = M.sys[s] || { done: 0, corp: {} };
-    M.done++; S.done++;
-    S.corp[c] = (S.corp[c] || 0) + 1;
-  });
-  return months;
-}
-
-// Чек-листы по месяцам (по дате чек-листа): месяц → система → корпус
-function anChkMonths() {
-  var months = {};
-  for (var k in CHECK_BY_CELL) {
-    var p = k.split('\x00');
     var s = (WORKS_MAP[p[0]] || {}).sistema || '—';
+    var S = sys[s] = sys[s] || { ids: {}, byM: {}, corp: {} };
+    var C = S.corp[p[1]] = S.corp[p[1]] || { ids: {}, byM: {} };
     CHECK_BY_CELL[k].forEach(function (r) {
       var mk = monthKey(r.date);
-      var M = months[mk] = months[mk] || { cells: 0, ids: {}, sys: {} };
-      var S = M.sys[s] = M.sys[s] || { cells: 0, ids: {}, corp: {} };
-      var C = S.corp[p[1]] = S.corp[p[1]] || { cells: 0, ids: {} };
-      M.cells++; S.cells++; C.cells++;
-      M.ids[r.id] = true; S.ids[r.id] = true; C.ids[r.id] = true;
+      mset[mk] = true;
+      S.ids[r.id] = true; C.ids[r.id] = true;
+      (S.byM[mk] = S.byM[mk] || {})[r.id] = true;
+      (C.byM[mk] = C.byM[mk] || {})[r.id] = true;
     });
   }
-  return months;
+  return { sys: sys, months: monthCols(mset) };
 }
 
 function renderAnalytics() {
-  var html;
-  if (AN_VIEW === 'month') html = (AN_MODE === 'chk') ? renderChkMonths() : renderFactMonths();
-  else                     html = (AN_MODE === 'chk') ? renderChkSys()    : renderFactSys();
-  document.getElementById('an-table').innerHTML = html;
+  document.getElementById('an-table').innerHTML =
+    (AN_MODE === 'chk') ? renderChkPivot() : renderFactPivot();
 }
 
-function renderFactSys() {
-  var d = anFactData();
-  var names = Object.keys(d).sort(naturalSort);
-  var html = '<tr><th>Система</th><th>Готово</th><th>Всего</th><th>%</th></tr>';
-  var td = 0, tt = 0;
+// Сводная «физика»: строки — системы (раскрываются в корпуса), столбцы — месяцы + итоги
+function renderFactPivot() {
+  var d = anFactPivot();
+  var names = Object.keys(d.sys).sort(naturalSort);
+  var months = d.months;
+  var mh = months.map(function (mk) { return '<th>' + e(monthShort(mk)) + '</th>'; }).join('');
+  var html = '<tr><th>Система</th>' + mh + '<th>Готово</th><th>Всего</th><th>%</th></tr>';
+  var tByM = {}, tDone = 0, tTotal = 0;
   names.forEach(function (s, i) {
-    var S = d[s];
-    td += S.done; tt += S.total;
-    html += '<tr class="an-sysrow" data-tgl="s' + i + '"><td>' + e(s) + '</td><td>' + S.done +
-            '</td><td>' + S.total + '</td><td>' + pct_(S.done, S.total) + '</td></tr>';
+    var S = d.sys[s];
+    tDone += S.done; tTotal += S.total;
+    months.forEach(function (mk) { tByM[mk] = (tByM[mk] || 0) + (S.byM[mk] || 0); });
+    html += '<tr class="an-sysrow" data-tgl="s' + i + '"><td>' + e(s) + '</td>' +
+            months.map(function (mk) { return '<td>' + (S.byM[mk] || '') + '</td>'; }).join('') +
+            '<td>' + S.done + '</td><td>' + S.total + '</td><td>' + pct_(S.done, S.total) + '</td></tr>';
     Object.keys(S.corp).sort(naturalSort).forEach(function (c) {
       var C = S.corp[c];
-      html += '<tr class="an-sub" data-grp="s' + i + '"><td>' + e(c) + '</td><td>' + C.done +
-              '</td><td>' + C.total + '</td><td>' + pct_(C.done, C.total) + '</td></tr>';
+      html += '<tr class="an-sub" data-grp="s' + i + '"><td>' + e(c) + '</td>' +
+              months.map(function (mk) { return '<td>' + (C.byM[mk] || '') + '</td>'; }).join('') +
+              '<td>' + C.done + '</td><td>' + C.total + '</td><td>' + pct_(C.done, C.total) + '</td></tr>';
     });
   });
-  html += '<tr class="an-total"><td>Всего</td><td>' + td + '</td><td>' + tt + '</td><td>' + pct_(td, tt) + '</td></tr>';
+  html += '<tr class="an-total"><td>Всего</td>' +
+          months.map(function (mk) { return '<td>' + (tByM[mk] || '') + '</td>'; }).join('') +
+          '<td>' + tDone + '</td><td>' + tTotal + '</td><td>' + pct_(tDone, tTotal) + '</td></tr>';
   return html;
 }
 
-function renderChkSys() {
-  var d = anChkData();
-  var names = Object.keys(d).sort(naturalSort);
+// Сводная «чек-листы»: значения — число чек-листов (уникальные id) по месяцам
+function renderChkPivot() {
+  var d = anChkPivot();
+  var names = Object.keys(d.sys).sort(naturalSort);
   if (!names.length) return '<tr><td style="color:#aaa">Чек-листов пока нет</td></tr>';
-  var html = '<tr><th>Система</th><th>Чек-листов</th><th>Ячеек</th></tr>';
-  var tIds = {}, tCells = 0;
+  var months = d.months;
+  var cnt = function (set) { var n = set ? Object.keys(set).length : 0; return n || ''; };
+  var mh = months.map(function (mk) { return '<th>' + e(monthShort(mk)) + '</th>'; }).join('');
+  var html = '<tr><th>Система</th>' + mh + '<th>Всего</th></tr>';
+  var tByM = {}, tIds = {};
   names.forEach(function (s, i) {
-    var S = d[s];
-    tCells += S.cells;
+    var S = d.sys[s];
     for (var id in S.ids) tIds[id] = true;
-    html += '<tr class="an-sysrow" data-tgl="s' + i + '"><td>' + e(s) + '</td><td>' +
-            Object.keys(S.ids).length + '</td><td>' + S.cells + '</td></tr>';
+    months.forEach(function (mk) {
+      if (!S.byM[mk]) return;
+      var T = tByM[mk] = tByM[mk] || {};
+      for (var id2 in S.byM[mk]) T[id2] = true;
+    });
+    html += '<tr class="an-sysrow" data-tgl="s' + i + '"><td>' + e(s) + '</td>' +
+            months.map(function (mk) { return '<td>' + cnt(S.byM[mk]) + '</td>'; }).join('') +
+            '<td>' + Object.keys(S.ids).length + '</td></tr>';
     Object.keys(S.corp).sort(naturalSort).forEach(function (c) {
       var C = S.corp[c];
-      html += '<tr class="an-sub" data-grp="s' + i + '"><td>' + e(c) + '</td><td>' +
-              Object.keys(C.ids).length + '</td><td>' + C.cells + '</td></tr>';
+      html += '<tr class="an-sub" data-grp="s' + i + '"><td>' + e(c) + '</td>' +
+              months.map(function (mk) { return '<td>' + cnt(C.byM[mk]) + '</td>'; }).join('') +
+              '<td>' + Object.keys(C.ids).length + '</td></tr>';
     });
   });
-  html += '<tr class="an-total"><td>Всего</td><td>' + Object.keys(tIds).length + '</td><td>' + tCells + '</td></tr>';
-  return html;
-}
-
-function renderFactMonths() {
-  var months = anFactMonths();
-  var mks = monthKeysSorted(months);
-  if (!mks.length) return '<tr><td style="color:#aaa">Готовых работ пока нет</td></tr>';
-  var html = '<tr><th>Месяц</th><th>Готово</th></tr>';
-  var tot = 0;
-  mks.forEach(function (mk, mi) {
-    var M = months[mk];
-    tot += M.done;
-    html += '<tr class="an-sysrow" data-tgl="m' + mi + '"><td>' + e(monthLabel(mk)) + '</td><td>' + M.done + '</td></tr>';
-    Object.keys(M.sys).sort(naturalSort).forEach(function (s, si) {
-      var S = M.sys[s];
-      var sid = 'm' + mi + '.s' + si;
-      html += '<tr class="an-sub" data-grp="m' + mi + '" data-tgl="' + sid + '"><td>' + e(s) + '</td><td>' + S.done + '</td></tr>';
-      Object.keys(S.corp).sort(naturalSort).forEach(function (c) {
-        html += '<tr class="an-sub2" data-grp="' + sid + '"><td>' + e(c) + '</td><td>' + S.corp[c] + '</td></tr>';
-      });
-    });
-  });
-  html += '<tr class="an-total"><td>Всего</td><td>' + tot + '</td></tr>';
-  return html;
-}
-
-function renderChkMonths() {
-  var months = anChkMonths();
-  var mks = monthKeysSorted(months);
-  if (!mks.length) return '<tr><td style="color:#aaa">Чек-листов пока нет</td></tr>';
-  var html = '<tr><th>Месяц</th><th>Чек-листов</th><th>Ячеек</th></tr>';
-  var tIds = {}, tCells = 0;
-  mks.forEach(function (mk, mi) {
-    var M = months[mk];
-    tCells += M.cells;
-    for (var id in M.ids) tIds[id] = true;
-    html += '<tr class="an-sysrow" data-tgl="m' + mi + '"><td>' + e(monthLabel(mk)) + '</td><td>' +
-            Object.keys(M.ids).length + '</td><td>' + M.cells + '</td></tr>';
-    Object.keys(M.sys).sort(naturalSort).forEach(function (s, si) {
-      var S = M.sys[s];
-      var sid = 'm' + mi + '.s' + si;
-      html += '<tr class="an-sub" data-grp="m' + mi + '" data-tgl="' + sid + '"><td>' + e(s) + '</td><td>' +
-              Object.keys(S.ids).length + '</td><td>' + S.cells + '</td></tr>';
-      Object.keys(S.corp).sort(naturalSort).forEach(function (c) {
-        var C = S.corp[c];
-        html += '<tr class="an-sub2" data-grp="' + sid + '"><td>' + e(c) + '</td><td>' +
-                Object.keys(C.ids).length + '</td><td>' + C.cells + '</td></tr>';
-      });
-    });
-  });
-  html += '<tr class="an-total"><td>Всего</td><td>' + Object.keys(tIds).length + '</td><td>' + tCells + '</td></tr>';
+  html += '<tr class="an-total"><td>Всего</td>' +
+          months.map(function (mk) { return '<td>' + cnt(tByM[mk]) + '</td>'; }).join('') +
+          '<td>' + Object.keys(tIds).length + '</td></tr>';
   return html;
 }
 
