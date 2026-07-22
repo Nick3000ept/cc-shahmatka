@@ -514,7 +514,7 @@ body.chk-open .board-wrap { margin-right: 324px; }
     <select class="fsel" id="fwork" onchange="render()" style="max-width:200px"><option value="">Все</option></select></div>
   <div><label>Чек-лист №</label>
     <input class="fsel" id="fchknum" style="max-width:110px" placeholder="номер"
-      autocomplete="off" name="cc-chk-filter"
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
       oninput="render()" title="Показать только работы этого чек-листа"></div>
   <button class="btn" onclick="clearFilters()" style="margin-left:4px">✕ Сбросить</button>
 </div>
@@ -780,6 +780,9 @@ window.onload = function () {
       if (c && c.scrollIntoView) c.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
     }
   };
+  // Chrome игнорирует autocomplete="off" и подсказывает по имени/id поля — даём случайное
+  // имя при каждой загрузке страницы, чтобы браузеру не за что было зацепиться историей
+  document.getElementById('fchknum').name = 'q' + Math.random().toString(36).slice(2);
   document.getElementById('cp-photo-inp').onchange = function () { uploadChecklistPhotos(this.files); };
   // Теги выделения: клик по тегу убирает работу из выделения
   document.getElementById('selbar').onclick = function (ev) {
