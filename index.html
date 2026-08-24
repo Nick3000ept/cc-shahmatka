@@ -1519,14 +1519,16 @@ function renderChkPanel(cols) {
     var edit = isInt
       ? '<button class="cp-edit" data-edit="' + e(g.id) + '" title="Редактировать этажи чек-листа">✏️</button>'
       : '';
-    var del = isInt
-      ? '<button class="cp-del" data-del="' + e(g.id) + '" data-num="' + e(g.number) + '" title="Удалить чек-лист">🗑</button>'
+    var isArc = g.source === 'archive';
+    // Удалять можно внутренние и архивные (мягкое удаление на сервере)
+    var del = (isInt || isArc)
+      ? '<button class="cp-del" data-del="' + e(g.id) + '" data-num="' + e(g.number || g.akt) + '" title="Удалить чек-лист">🗑</button>'
       : '';
     var comm = g.comment
       ? '<div class="cp-comm">💬 ' + e(g.comment) + '</div>'
       : '';
     var sel = String(SEL_CHK) === String(g.id) ? ' sel' : '';
-    var tip = g.by ? ' title="Загрузил: ' + e(g.by) + '"' : '';
+    var tip = g.by ? ' title="' + (isArc ? 'Подрядчик: ' : 'Загрузил: ') + e(g.by) + '"' : '';
     return '<div class="cp-item' + sel + '" data-id="' + e(g.id) + '"' + tip + '>' +
              '<div class="cp-top"><span class="cp-num">' + e(num) + '</span></div>' +
              '<div class="cp-loc">' + e(g.corpus) + ' · эт. ' + e(fl.join(', ')) +
@@ -1566,8 +1568,11 @@ function requestDeleteChecklist(id, num) {
   if (!getUserName()) { openName(function () { requestDeleteChecklist(id, num); }); return; }
   var name = num ? '№ ' + num : '';
   if (!confirm('Удалить чек-лист ' + (name ? name + ' ' : '') + 'из шахматки?')) return;
+  // Внутренние и архивные удаляются разными действиями (разные листы таблицы)
+  var rec = chkGroupInfo(id);
+  var action = (rec && rec.source === 'archive') ? 'deleteArchiveChecklist' : 'deleteChecklist';
   setSt('spin', '…');
-  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'deleteChecklist', id: id, user: getUserName() }) })
+  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: action, id: id, user: getUserName() }) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
@@ -1924,8 +1929,9 @@ function openWorkCard(corpus, pod, floorNum, workId) {
         if (c.number) info.push('№ ' + c.number);
         if (c.file)   info.push(c.file);
         if (c.date)   info.push(c.date);
-        if (c.by)     info.push('загрузил: ' + c.by);
-        var src = c.source === 'internal' ? '<span class="cl-src">загружен</span>' : '';
+        if (c.by)     info.push((c.source === 'archive' ? 'подрядчик: ' : 'загрузил: ') + c.by);
+        var src = c.source === 'internal' ? '<span class="cl-src">загружен</span>'
+                : c.source === 'archive'  ? '<span class="cl-src">архив</span>' : '';
         // Внутренние чек-листы админ может редактировать (статус на всю группу), внешние — read-only
         var statusHtml = (c.source === 'internal' && IS_ADMIN)
           ? statusSelect(st, c.id)

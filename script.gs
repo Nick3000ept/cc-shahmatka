@@ -9,6 +9,7 @@ const FLOORS_SHEET    = 'Реестр этажей';
 const CHK_HIER_SHEET  = 'Чек листы иерархия';
 const CHK_SHEET       = 'Чек листы';
 const CHK_INT_SHEET   = 'Чек листы_внутренние';
+const CHK_ARC_SHEET   = 'Архив';
 const CHK_FOLDER_NAME = 'Чек листы СС';
 const INCLUDE_EXTERNAL = false; // внешние чек-листы (лист «Чек листы» + иерархия) отключены; true — вернуть
 const ADMIN_PASSWORD  = 'adminCC';
@@ -89,6 +90,12 @@ function doPost(e) {
     if (body.action === 'editChecklistCells') {
       return jsonOut(editInternalChecklistCells(body));
     }
+    if (body.action === 'deleteArchiveChecklist') {
+      return jsonOut(deleteArchiveChecklist(body));
+    }
+    if (body.action === 'importArchive') {
+      return jsonOut(importArchiveRows(body));
+    }
     return jsonOut({ error: 'Unknown action' });
   } catch (err) {
     return jsonOut({ error: err.toString() });
@@ -123,6 +130,7 @@ function getChecklists() {
     stats = { external: 'off' };
   }
   addInternalChecklists(ss, checkByCell); // внутренние чек-листы (загруженные через сайт)
+  stats.archive = addArchiveChecklists(ss, checkByCell); // архив acons-app (лист «Архив»)
   return {
     checkByCell: checkByCell, // `workId\x00corpus\x00floor` → [{...,id,source}]
     checkStats : stats,
@@ -338,6 +346,102 @@ function addInternalChecklists(ss, checkByCell) {
       source : 'internal',
     });
   });
+}
+
+// ─── Архив чек-листов acons-app (лист «Архив») ──────────────────────────────
+// Одна строка = чек-лист × этаж × работа шахматки (привязка выполнена заранее).
+// Колонки: A ID_архива  B Номер акта  C Дата  D Статус  E Корпус  F Этаж  G ID_работы
+//          H Система  I Работа  J Локация  K Захватка  L Метод привязки  M Файл
+//          N Ссылка  O Подрядчик  P Комментарий  Q Пометка («Удалён · кто · когда» — скрыта)
+// Архив read-only: правится только пометка Q (мягкое удаление всей группы по ID_архива).
+var ARC_HEADERS = ['ID_архива', 'Номер акта', 'Дата', 'Статус', 'Корпус', 'Этаж', 'ID_работы',
+  'Система', 'Работа', 'Локация', 'Захватка', 'Метод привязки', 'Файл', 'Ссылка',
+  'Подрядчик', 'Комментарий', 'Пометка'];
+
+function addArchiveChecklists(ss, checkByCell) {
+  var sheet = ss.getSheetByName(CHK_ARC_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  var added = 0;
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, 17).getValues().forEach(function (r) {
+    var workId = String(r[6]).trim();
+    var corpus = String(r[4]).trim();
+    if (!workId || !corpus) return;
+    if (String(r[16]).trim().indexOf('Удалён') === 0) return; // «мягко» удалённые не отдаём
+    var key = workId + '\x00' + corpus + '\x00' + floorNorm(r[5]);
+    (checkByCell[key] = checkByCell[key] || []).push({
+      id     : String(r[0]).trim(),
+      status : String(r[3]).trim(),
+      akt    : String(r[1]).trim(),
+      date   : formatDateOut(r[2]),
+      link   : String(r[13]).trim(),
+      file   : String(r[12]).trim(),
+      comment: String(r[15]).trim(),
+      by     : String(r[14]).trim(), // подрядчик
+      source : 'archive',
+    });
+    added++;
+  });
+  return added;
+}
+
+// «Удаление» архивного чек-листа: строки НЕ удаляются, вся группа (по ID_архива)
+// получает пометку в столбце Q и перестаёт отдаваться фронту.
+// Восстановление — очистить Q у строк группы в листе «Архив».
+function deleteArchiveChecklist(body) {
+  var id   = String(body.id   || '').trim();
+  var user = String(body.user || '').trim();
+  if (!id) throw new Error('Не указан ID чек-листа');
+
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CHK_ARC_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) throw new Error('Лист «Архив» пуст');
+
+  var n    = sheet.getLastRow() - 1;
+  var idA  = sheet.getRange(2, 1, n, 1).getValues();   // столбец A (ID_архива)
+  var qCol = sheet.getRange(2, 17, n, 1).getValues();  // столбец Q (Пометка)
+  var mark = changeMark_(user, 'удалил'); // «кто · когда · удалил»
+  var updated = 0;
+  for (var i = 0; i < n; i++) {
+    if (String(idA[i][0]).trim() === id) { qCol[i][0] = 'Удалён · ' + mark; updated++; }
+  }
+  if (!updated) throw new Error('Чек-лист не найден: ' + id);
+  sheet.getRange(2, 17, n, 1).setValues(qCol);
+  SpreadsheetApp.flush();
+  return { ok: true, updated: updated };
+}
+
+// Пакетная загрузка строк в лист «Архив» (разовый перенос из выгрузки acons-app).
+// body: { pwd, rows: [[A..P] × N] } — pwd обязателен; строки только дописываются.
+function importArchiveRows(body) {
+  if (String(body.pwd) !== ADMIN_PASSWORD) throw new Error('Нет доступа');
+  var rows = body.rows || [];
+  if (!rows.length) throw new Error('Нет строк');
+
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CHK_ARC_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(CHK_ARC_SHEET);
+    sheet.getRange(1, 1, 1, ARC_HEADERS.length).setValues([ARC_HEADERS]);
+    sheet.setFrozenRows(1);
+  }
+  var vals = rows.map(function (r) {
+    var row = r.slice(0, 16);
+    while (row.length < 16) row.push('');
+    row.push(''); // Q Пометка — пустая
+    return row.map(function (c) { return safeCellArc_(c); });
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, vals.length, 17).setValues(vals);
+  SpreadsheetApp.flush();
+  return { ok: true, added: vals.length, total: sheet.getLastRow() - 1 };
+}
+
+// Экранирование значения для листа «Архив»: строки, начинающиеся с =,+,@ — апостроф
+// спереди (защита от formula injection); ограничение длины.
+function safeCellArc_(v) {
+  var s = String(v == null ? '' : v);
+  if (s.length > 5000) s = s.slice(0, 5000);
+  if (/^[=+@]/.test(s)) s = "'" + s;
+  return s;
 }
 
 // Ключ тройки имён (нормализованный): раздел \x00 подраздел \x00 работа
