@@ -199,7 +199,7 @@ body.add-mode td.cell:not(.c-na):hover { box-shadow: inset 0 0 0 3px #ffc27a; }
 .cp-loc { font-size: 12px; color: #555; }
 /* Нижняя строка карточки: статус · фото · удалить */
 .cp-actions {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   margin-top: 6px; padding-top: 6px; border-top: 1px solid #f0f2f5;
 }
 .cp-actions .cl-status-sel { flex: 1; min-width: 0; max-width: none; }
@@ -399,9 +399,25 @@ body.chk-open .board-wrap { margin-right: 324px; }
 .cl-head { font-size: 12px; color: #888; margin-bottom: 8px; text-transform: uppercase; letter-spacing: .03em; }
 .cl-empty { color: #aaa; font-size: 13px; padding: 8px 0; }
 .cl-item {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 9px 0; border-bottom: 1px solid #f0f0f0;
 }
+/* Раскрывающийся состав чек-листа (кнопка «работы») */
+.cl-works-btn, .cp-works {
+  font-size: 11px; padding: 3px 8px; border: 1px solid #ccc; border-radius: 8px;
+  background: #fff; color: #34507f; cursor: pointer; flex-shrink: 0;
+}
+.cl-works-btn:hover, .cp-works:hover { background: #f0f4ff; border-color: #99b3e6; }
+.cl-works-btn.open, .cp-works.open { background: #e8eefc; border-color: #99b3e6; }
+.cw-list {
+  flex-basis: 100%; margin-top: 4px; padding: 6px 8px;
+  background: #f7f9fd; border-radius: 6px; font-size: 12px; color: #444;
+}
+.cw-row { padding: 2px 0; }
+.cw-sys { font-weight: 600; color: #1a3a6b; }
+.cw-det { color: #888; }
+.cw-fl { color: #666; white-space: nowrap; }
+.cw-empty { color: #999; font-size: 12px; }
 .cl-item:last-child { border-bottom: none; }
 .cl-status {
   font-size: 11px; padding: 2px 8px; border-radius: 10px;
@@ -769,6 +785,8 @@ window.onload = function () {
     if (ph) { openPhotoModal(ph.dataset.photo); return; }
     var ed = ev.target.closest ? ev.target.closest('[data-edit]') : null;
     if (ed) { requestEditChecklist(ed.dataset.edit); return; }
+    var wb = ev.target.closest ? ev.target.closest('[data-works]') : null;
+    if (wb) { toggleChkWorks(wb); return; }
     // Клики по селекту статуса и ссылкам на файлы не должны переключать подсветку
     if (ev.target.closest && ev.target.closest('select, a')) return;
     var item = ev.target.closest ? ev.target.closest('.cp-item') : null;
@@ -784,6 +802,11 @@ window.onload = function () {
   // имя при каждой загрузке страницы, чтобы браузеру не за что было зацепиться историей
   document.getElementById('fchknum').name = 'q' + Math.random().toString(36).slice(2);
   document.getElementById('cp-photo-inp').onchange = function () { uploadChecklistPhotos(this.files); };
+  // Карточка работы: кнопка «работы ▾» у чек-листа раскрывает его состав
+  document.getElementById('card-checklists').onclick = function (ev) {
+    var wb = ev.target.closest ? ev.target.closest('[data-works]') : null;
+    if (wb) toggleChkWorks(wb);
+  };
   // Теги выделения: клик по тегу убирает работу из выделения
   document.getElementById('selbar').onclick = function (ev) {
     var tag = ev.target.closest ? ev.target.closest('[data-unsel]') : null;
@@ -1524,6 +1547,8 @@ function renderChkPanel(cols) {
     var del = (isInt || isArc)
       ? '<button class="cp-del" data-del="' + e(g.id) + '" data-num="' + e(g.number || g.akt) + '" title="Удалить чек-лист">🗑</button>'
       : '';
+    var worksBtn = '<button class="cp-works" data-works="' + e(g.id) +
+                   '" title="Работы, входящие в чек-лист">работы ▾</button>';
     var comm = g.comment
       ? '<div class="cp-comm">💬 ' + e(g.comment) + '</div>'
       : '';
@@ -1533,10 +1558,83 @@ function renderChkPanel(cols) {
              '<div class="cp-top"><span class="cp-num">' + e(num) + '</span></div>' +
              '<div class="cp-loc">' + e(g.corpus) + ' · эт. ' + e(fl.join(', ')) +
              (g.date ? ' · ' + e(g.date) : '') + '</div>' +
-             '<div class="cp-actions">' + statusHtml + photo + edit + del + '</div>' +
+             '<div class="cp-actions">' + statusHtml + photo + edit + worksBtn + del + '</div>' +
              comm +
            '</div>';
   }).join('');
+}
+
+// Состав чек-листа: какие работы шахматки он покрывает и на каких этажах.
+// Собирается из CHECK_BY_CELL: все ключи (работа × корпус × этаж) с записью этого id.
+function chkWorksSummary(id) {
+  var byWork = {};
+  for (var k in CHECK_BY_CELL) {
+    var recs = CHECK_BY_CELL[k];
+    for (var i = 0; i < recs.length; i++) {
+      if (String(recs[i].id) !== String(id)) continue;
+      var p = k.split('\x00'); // [workId, corpus, floor]
+      var w = byWork[p[0]];
+      if (!w) w = byWork[p[0]] = { workId: p[0], floors: {} };
+      w.floors[p[2]] = true;
+      break;
+    }
+  }
+  var list = [];
+  for (var wid in byWork) {
+    var info = WORKS_MAP[wid] || {};
+    list.push({
+      workId: wid,
+      sistema: info.sistema || '',
+      name: info.nameGrid || info.work || wid,
+      lokacia: info.lokacia || '',
+      zahvatka: info.zahvatka || '',
+      floors: Object.keys(byWork[wid].floors).map(parseFloat).sort(function (a, b) { return a - b; }),
+    });
+  }
+  list.sort(function (a, b) {
+    if (a.sistema !== b.sistema) return naturalSort(a.sistema, b.sistema);
+    return naturalSort(a.name, b.name);
+  });
+  return list;
+}
+
+// Список этажей с диапазонами: [2,3,4,7] → «2–4, 7»
+function floorsRangeLabel(fl) {
+  var out = [], a = null, p = null;
+  for (var i = 0; i < fl.length; i++) {
+    var f = fl[i];
+    if (a === null) { a = f; p = f; continue; }
+    if (f === p + 1) { p = f; continue; }
+    out.push(a === p ? String(a) : a + '–' + p);
+    a = f; p = f;
+  }
+  if (a !== null) out.push(a === p ? String(a) : a + '–' + p);
+  return out.join(', ');
+}
+
+// HTML списка работ чек-листа (для раскрытия в карточке и панели)
+function chkWorksHtml(id) {
+  var list = chkWorksSummary(id);
+  if (!list.length) return '<div class="cw-empty">Работы не найдены</div>';
+  return list.map(function (w) {
+    var det = [w.lokacia, w.zahvatka].filter(Boolean).join(', ');
+    return '<div class="cw-row"><span class="cw-sys">' + e(w.sistema) + '</span> ' + e(w.name) +
+           (det ? ' <span class="cw-det">(' + e(det) + ')</span>' : '') +
+           ' <span class="cw-fl">эт. ' + e(floorsRangeLabel(w.floors)) + '</span></div>';
+  }).join('');
+}
+
+// Раскрыть/свернуть список работ под кнопкой «работы» (в карточке и панели)
+function toggleChkWorks(btn) {
+  var host = btn.closest('.cl-item') || btn.closest('.cp-item');
+  if (!host) return;
+  var box = host.querySelector('.cw-list');
+  if (box) { box.remove(); btn.classList.remove('open'); return; }
+  box = document.createElement('div');
+  box.className = 'cw-list';
+  box.innerHTML = chkWorksHtml(btn.dataset.works);
+  host.appendChild(box);
+  btn.classList.add('open');
 }
 
 // Есть ли у ячейки чек-лист с данным id
@@ -1946,10 +2044,12 @@ function openWorkCard(corpus, pod, floorNum, workId) {
             return '<a href="' + e(fx.u) + '" target="_blank" rel="noopener" title="' + e(fx.n || '') + '">📷 фото ' + (i + 1) + '</a>';
           }).join('') + '</div>';
         }
+        var worksBtn = '<button class="cl-works-btn" data-works="' + e(c.id) +
+                       '" title="Работы, входящие в чек-лист">работы ▾</button>';
         return '<div class="cl-item">' +
                  statusHtml +
                  '<div class="cl-info">' + e(info.join(' · ')) + src + extra + '</div>' +
-                 link +
+                 worksBtn + link +
                '</div>';
       }).join('');
   }
