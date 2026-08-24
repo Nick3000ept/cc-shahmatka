@@ -93,6 +93,9 @@ function doPost(e) {
     if (body.action === 'deleteArchiveChecklist') {
       return jsonOut(deleteArchiveChecklist(body));
     }
+    if (body.action === 'removeArchiveWork') {
+      return jsonOut(removeArchiveWork(body));
+    }
     if (body.action === 'importArchive') {
       return jsonOut(importArchiveRows(body));
     }
@@ -405,6 +408,38 @@ function deleteArchiveChecklist(body) {
     if (String(idA[i][0]).trim() === id) { qCol[i][0] = 'Удалён · ' + mark; updated++; }
   }
   if (!updated) throw new Error('Чек-лист не найден: ' + id);
+  sheet.getRange(2, 17, n, 1).setValues(qCol);
+  SpreadsheetApp.flush();
+  return { ok: true, updated: updated };
+}
+
+// Убрать одну работу из архивного чек-листа (правка привязки): все строки группы
+// (ID_архива) с этим ID_работы получают пометку в Q и перестают отдаваться фронту.
+// Строки не удаляются; восстановление — очистить Q в листе «Архив».
+function removeArchiveWork(body) {
+  var id     = String(body.id     || '').trim();
+  var workId = String(body.workId || '').trim();
+  var user   = String(body.user   || '').trim();
+  if (!id)     throw new Error('Не указан ID чек-листа');
+  if (!workId) throw new Error('Не указан ID работы');
+
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CHK_ARC_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) throw new Error('Лист «Архив» пуст');
+
+  var n    = sheet.getLastRow() - 1;
+  var idA  = sheet.getRange(2, 1, n, 1).getValues();  // A ID_архива
+  var wG   = sheet.getRange(2, 7, n, 1).getValues();  // G ID_работы
+  var qCol = sheet.getRange(2, 17, n, 1).getValues(); // Q Пометка
+  var mark = 'Удалён · ' + changeMark_(user, 'убрал работу ' + workId);
+  var updated = 0;
+  for (var i = 0; i < n; i++) {
+    if (String(idA[i][0]).trim() === id && String(wG[i][0]).trim() === workId &&
+        String(qCol[i][0]).trim().indexOf('Удалён') !== 0) {
+      qCol[i][0] = mark; updated++;
+    }
+  }
+  if (!updated) throw new Error('Строки не найдены: ' + id + ' / ' + workId);
   sheet.getRange(2, 17, n, 1).setValues(qCol);
   SpreadsheetApp.flush();
   return { ok: true, updated: updated };
