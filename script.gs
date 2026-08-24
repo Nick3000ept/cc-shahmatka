@@ -96,6 +96,9 @@ function doPost(e) {
     if (body.action === 'removeArchiveWork') {
       return jsonOut(removeArchiveWork(body));
     }
+    if (body.action === 'editArchiveCells') {
+      return jsonOut(editArchiveCells(body));
+    }
     if (body.action === 'importArchive') {
       return jsonOut(importArchiveRows(body));
     }
@@ -443,6 +446,72 @@ function removeArchiveWork(body) {
   sheet.getRange(2, 17, n, 1).setValues(qCol);
   SpreadsheetApp.flush();
   return { ok: true, updated: updated };
+}
+
+// Правка состава архивного чек-листа (режим выделения ячеек на шахматке).
+// body: { id, cells:[{workId,floor}], user } — полный новый набор ячеек группы.
+// Строки не удаляются: убранная ячейка — пометка в Q, добавленная — новая строка
+// с копией общих полей группы и данными работы из справочника (метод — «правка вручную»).
+// Мета (акт/дата/статус/корпус/файл) не меняется.
+function editArchiveCells(body) {
+  var id    = String(body.id   || '').trim();
+  var user  = String(body.user || '').trim();
+  var cells = body.cells || [];
+  if (!id)           throw new Error('Не указан ID чек-листа');
+  if (!cells.length) throw new Error('Нужна хотя бы одна ячейка');
+
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CHK_ARC_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) throw new Error('Лист «Архив» пуст');
+
+  var n    = sheet.getLastRow() - 1;
+  var vals = sheet.getRange(2, 1, n, 17).getValues(); // A–Q
+
+  // Новый набор: ключ «работа + этаж»
+  var want = {};
+  cells.forEach(function (c) {
+    want[String(c.workId).trim() + '\x00' + floorNorm(c.floor)] = c;
+  });
+
+  // Активные строки группы (без помеченных)
+  var active = [], have = {}, tpl = null;
+  for (var i = 0; i < n; i++) {
+    if (String(vals[i][0]).trim() !== id) continue;
+    if (String(vals[i][16]).trim().indexOf('Удалён') === 0) continue;
+    active.push(i);
+    if (!tpl) tpl = vals[i];
+    have[String(vals[i][6]).trim() + '\x00' + floorNorm(vals[i][5])] = true;
+  }
+  if (!active.length) throw new Error('Чек-лист не найден: ' + id);
+
+  var mark = 'Удалён · ' + changeMark_(user, 'правка состава');
+
+  // Убранные ячейки — пометить
+  var removed = 0;
+  active.forEach(function (i) {
+    var key = String(vals[i][6]).trim() + '\x00' + floorNorm(vals[i][5]);
+    if (!want[key]) { sheet.getRange(i + 2, 17).setValue(mark); removed++; }
+  });
+
+  // Добавленные — новые строки: общие поля из шаблона группы, работа — из справочника
+  var wmap = {};
+  readWorks(ss).forEach(function (w) { wmap[w.workId] = w; });
+  var newRows = [];
+  for (var key2 in want) {
+    if (have[key2]) continue;
+    var p = key2.split('\x00');
+    var w = wmap[p[0]] || {};
+    newRows.push([
+      id, tpl[1], tpl[2], tpl[3], tpl[4], p[1], p[0],
+      w.sistema || '', w.work || '', w.lokacia || '', w.zahvatka || '',
+      'правка вручную (' + user + ')', tpl[12], tpl[13], tpl[14], tpl[15], '',
+    ].map(function (c) { return safeCellArc_(c); }));
+  }
+  if (newRows.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 17).setValues(newRows);
+  }
+  SpreadsheetApp.flush();
+  return { ok: true, added: newRows.length, removed: removed };
 }
 
 // Пакетная загрузка строк в лист «Архив» (разовый перенос из выгрузки acons-app).

@@ -763,6 +763,7 @@ var CHECKS_LOADED = false; // чек-листы (checkByCell) подгружен
 var STATUS_LIST = ['Принято', 'Есть замечания', 'Замечания устранены']; // статусы чек-листа
 var ADD_MODE   = false; // режим выделения ячеек для нового чек-листа
 var EDIT_CHK   = null;  // id чек-листа, состав которого правим (режим выделения)
+var EDIT_SRC   = null;  // источник правимого чек-листа: 'internal' | 'archive'
 var SELECTED   = {};    // key → {workId, corpus, floor, nameGrid}
 var ADD_CORPUS = '';    // корпус текущего выделения (мультивыбор в пределах 1 корпуса)
 
@@ -801,6 +802,8 @@ window.onload = function () {
     if (wb) { toggleChkWorks(wb); return; }
     var cwe = ev.target.closest ? ev.target.closest('[data-cwedit]') : null;
     if (cwe) { cwEditClick(cwe); return; }
+    var cwr = ev.target.closest ? ev.target.closest('[data-cwrm]') : null;
+    if (cwr) { cwRmToggle(cwr); return; }
     var rmw = ev.target.closest ? ev.target.closest('[data-rmwork]') : null;
     if (rmw) { requestRemoveArchiveWork(rmw.closest('.cw-list'), rmw.dataset.rmwork); return; }
     // Клики по селекту статуса и ссылкам на файлы не должны переключать подсветку
@@ -824,6 +827,8 @@ window.onload = function () {
     if (wb) { toggleChkWorks(wb); return; }
     var cwe = ev.target.closest ? ev.target.closest('[data-cwedit]') : null;
     if (cwe) { cwEditClick(cwe); return; }
+    var cwr = ev.target.closest ? ev.target.closest('[data-cwrm]') : null;
+    if (cwr) { cwRmToggle(cwr); return; }
     var rmw = ev.target.closest ? ev.target.closest('[data-rmwork]') : null;
     if (rmw) requestRemoveArchiveWork(rmw.closest('.cw-list'), rmw.dataset.rmwork);
   };
@@ -1559,7 +1564,7 @@ function renderChkPanel(cols) {
     var photo = isInt
       ? '<button class="cp-photo" data-photo="' + e(g.id) + '" title="Фотографии чек-листа">📷' + (nPhotos ? ' ' + nPhotos : '') + '</button>'
       : '';
-    var edit = isInt
+    var edit = (isInt || isArc)
       ? '<button class="cp-edit" data-edit="' + e(g.id) + '" title="Редактировать этажи чек-листа">✏️</button>'
       : '';
     var isArc = g.source === 'archive';
@@ -1646,15 +1651,19 @@ function chkWorksHtml(id, edit) {
            (det ? ' <span class="cw-det">(' + e(det) + ')</span>' : '') +
            ' <span class="cw-fl">эт. ' + e(floorsRangeLabel(w.floors)) + '</span></div>';
   }).join('');
-  // Кнопка «Редактировать» внизу: внутренние — режим выделения ячеек, архивные — крестики
+  // Кнопки внизу: «Редактировать» — режим выделения ячеек на шахматке (внутренние и архивные);
+  // у архивных дополнительно «Убрать работы» — крестики, ✕ убирает работу целиком
   var rec = chkGroupInfo(id);
   var actions = '';
   if (rec && rec.source === 'internal') {
     actions = '<div class="cw-actions"><button class="cw-edit" data-cwedit="' + e(id) + '">✏️ Редактировать состав</button></div>';
   } else if (rec && rec.source === 'archive') {
     actions = edit
-      ? '<div class="cw-actions cw-hint">клик по ✕ убирает работу · <button class="cw-edit" data-cwedit="' + e(id) + '">готово</button></div>'
-      : '<div class="cw-actions"><button class="cw-edit" data-cwedit="' + e(id) + '">✏️ Редактировать</button></div>';
+      ? '<div class="cw-actions cw-hint">клик по ✕ убирает работу со всех этажей · <button class="cw-edit" data-cwrm="' + e(id) + '">готово</button></div>'
+      : '<div class="cw-actions">' +
+          '<button class="cw-edit" data-cwedit="' + e(id) + '" title="Добавлять/убирать этажи кликами по ячейкам шахматки">✏️ Редактировать</button> ' +
+          '<button class="cw-edit" data-cwrm="' + e(id) + '" title="Убрать работу из чек-листа целиком">✕ Убрать работы</button>' +
+        '</div>';
   }
   return rows + actions;
 }
@@ -1673,21 +1682,22 @@ function toggleChkWorks(btn) {
   btn.classList.add('open');
 }
 
-// Кнопка «Редактировать» под списком работ
+// «✏️ Редактировать» под списком работ — режим выделения ячеек на шахматке
 function cwEditClick(btn) {
   var box = btn.closest('.cw-list');
   var id  = box ? box.dataset.chkid : btn.dataset.cwedit;
-  var rec = chkGroupInfo(id);
-  if (!rec) return;
-  if (rec.source === 'internal') {
-    // Существующий режим правки состава на шахматке
-    closeCard();
-    requestEditChecklist(id);
-    return;
-  }
-  // Архивные: включить/выключить режим крестиков (требует входа и имени)
-  if (!IS_ADMIN) { openPwd(function () { cwEditClick(btn); }); return; }
-  if (!getUserName()) { openName(function () { cwEditClick(btn); }); return; }
+  if (!chkGroupInfo(id)) return;
+  closeCard();
+  requestEditChecklist(id);
+}
+
+// «✕ Убрать работы» (архивные) — включить/выключить режим крестиков
+function cwRmToggle(btn) {
+  var box = btn.closest('.cw-list');
+  if (!box) return;
+  var id = box.dataset.chkid;
+  if (!IS_ADMIN) { openPwd(function () { cwRmToggle(btn); }); return; }
+  if (!getUserName()) { openName(function () { cwRmToggle(btn); }); return; }
   var on = !box.classList.contains('edit');
   box.classList.toggle('edit', on);
   box.innerHTML = chkWorksHtml(id, on);
@@ -1851,6 +1861,7 @@ function requestEditChecklist(id) {
   if (ADD_MODE) cancelAdd(); // выйти из предыдущего выделения
 
   EDIT_CHK = id;
+  EDIT_SRC = info.rec.source || 'internal';
   ADD_MODE = true;
   CHECK_MODE = true; document.getElementById('chk-mode').checked = true;
   updateChkPanel();
@@ -1921,14 +1932,17 @@ function saveEditCells() {
   var btn = document.getElementById('addbar-up');
   btn.disabled = true; btn.textContent = 'Сохранение…';
   setSt('spin', '…');
-  fetch(BASE, { method: 'POST', body: JSON.stringify({
-    action: 'editChecklistCells', id: id, cells: cells,
-    number: number, date: dateISO, comment: comment, user: user,
-  }) })
+  // Архивные правятся своим действием (лист «Архив»), мета не меняется
+  var isArc = EDIT_SRC === 'archive';
+  var payload = isArc
+    ? { action: 'editArchiveCells', id: id, cells: cells, user: user }
+    : { action: 'editChecklistCells', id: id, cells: cells,
+        number: number, date: dateISO, comment: comment, user: user };
+  fetch(BASE, { method: 'POST', body: JSON.stringify(payload) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
-      updateLocalChecklistMeta(id, number, dateISO, comment);
+      if (!isArc) updateLocalChecklistMeta(id, number, dateISO, comment);
       applyLocalCells(id, corpus, cells);
       setSt('ok', 'сохранено');
       toast('Чек-лист обновлён (добавлено ' + d.added + ', убрано ' + d.removed + ')', 'ok');
@@ -2223,7 +2237,7 @@ function toggleAddMode() {
 }
 
 function cancelAdd() {
-  ADD_MODE = false; EDIT_CHK = null; SELECTED = {}; ADD_CORPUS = '';
+  ADD_MODE = false; EDIT_CHK = null; EDIT_SRC = null; SELECTED = {}; ADD_CORPUS = '';
   document.body.classList.remove('add-mode');
   document.getElementById('add-chk-btn').classList.remove('on');
   document.getElementById('addbar').classList.add('hide');
@@ -2291,6 +2305,11 @@ function updateAddbar() {
     btn.textContent = 'Загрузить чек-лист';
   }
   document.getElementById('addbar-edit').classList.toggle('hide', !EDIT_CHK);
+  // У архивных меняется только состав ячеек — №/дату/комментарий не показываем (имя нужно)
+  var isArc = EDIT_CHK && EDIT_SRC === 'archive';
+  ['ab-num', 'ab-date', 'ab-comm'].forEach(function (fid) {
+    document.getElementById(fid).style.display = isArc ? 'none' : '';
+  });
   btn.disabled = !n;
   updateSelTags();
 }
