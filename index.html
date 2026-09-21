@@ -323,11 +323,14 @@ body.chk-open .board-wrap { margin-right: 324px; }
   z-index: 500;
 }
 #pwd-overlay.hide, #nm-overlay.hide { display: none; }
-#pwd-box, #nm-box {
+#guest-closed { position: fixed; inset: 0; background: #f4f6f9; z-index: 900; display: flex; align-items: center; justify-content: center; }
+#guest-closed.hide { display: none; }
+#gc-box { text-align: center; }
+#pwd-box, #nm-box, #gc-box {
   background: #fff; padding: 24px 28px; border-radius: 10px;
   width: 300px; box-shadow: 0 8px 32px rgba(0,0,0,.15);
 }
-#pwd-box h3, #nm-box h3 { margin-bottom: 14px; font-size: 15px; color: #1a3a6b; }
+#pwd-box h3, #nm-box h3, #gc-box h3 { margin-bottom: 14px; font-size: 15px; color: #1a3a6b; }
 #pwd-inp, #nm-inp {
   width: 100%; padding: 9px 10px;
   border: 1px solid #ccc; border-radius: 5px;
@@ -517,8 +520,11 @@ body.chk-open .board-wrap { margin-right: 324px; }
 <!-- TOPBAR -->
 <div class="topbar">
   <h1>СС · Шахматка</h1>
+  <!-- Только при входе через портал на *.acons.space (applyPortalUI, 2026-09-21) -->
+  <a class="btn" id="portal-back" href="https://acons.space" style="display:none;text-decoration:none;" title="Вернуться к списку инструментов">← Портал</a>
   <button class="btn" onclick="reload()">↺ Обновить</button>
   <button class="btn btn-pri" id="auth-btn" onclick="openPwd(null)">🔐 Войти</button>
+  <button class="btn" id="portal-logout" style="display:none" onclick="portalLogout()" title="Забыть вход через портал и вернуться на acons.space">Выйти</button>
   <label class="chk-toggle" title="Показать количество чек-листов в ячейках">
     <input type="checkbox" id="chk-mode" onchange="toggleCheckMode()"> 📋 Чек листы</label>
   <button class="btn" id="add-chk-btn" onclick="toggleAddMode()" title="Загрузить новый чек-лист">+ Чек-лист</button>
@@ -734,18 +740,109 @@ body.chk-open .board-wrap { margin-right: 324px; }
 <div id="pwd-overlay" class="hide">
   <div id="pwd-box">
     <h3>Администратор</h3>
+    <!-- Только *.acons.space (applyPortalUI): пояснение вместо поля пароля -->
+    <p id="pwd-sub" style="display:none;margin:0 0 12px;font-size:13px;color:#555;">На этом адресе вход для правки — через портал единого входа acons.space</p>
     <input id="pwd-inp" type="password" placeholder="Введите пароль"
       onkeydown="if(event.key==='Enter')submitPwd()">
     <div class="pwd-btns">
       <button class="btn" onclick="closePwd()">Отмена</button>
-      <button class="btn btn-pri" onclick="submitPwd()">Войти</button>
+      <button class="btn btn-pri" id="pwd-ok" onclick="submitPwd()">Войти</button>
+      <a class="btn btn-pri" id="pwd-portal" href="https://acons.space/?next=ss" style="display:none;text-decoration:none;">Войти через портал</a>
     </div>
+  </div>
+</div>
+
+<!-- Только *.acons.space: владелец закрыл просмотр без входа на портале (checkGuestAccess, 2026-09-21) -->
+<div id="guest-closed" class="hide">
+  <div id="gc-box">
+    <h3>СС · Шахматка</h3>
+    <p style="margin:0 0 14px;font-size:13px;color:#555;">Просмотр без входа закрыт. Войдите через портал acons.space под своей учётной записью</p>
+    <a class="btn btn-pri" href="https://acons.space/?next=ss" style="text-decoration:none;">Войти через портал</a>
   </div>
 </div>
 
 <script>
 // ─── CONFIG ─────────────────────────────────────────────────────────────────
 var BASE = 'https://script.google.com/macros/s/AKfycbxWe1t4HXvXHaMkeXYcRFAzx3aJ-QErc98efb867aGhcUw0fogI5NO3X_fBeO_tvY3G/exec';
+
+// ─── ПРАВА НА ЗАПИСЬ И ВХОД ЧЕРЕЗ ПОРТАЛ acons.space (2026-09-21) ───────────
+// С 2026-09-21 бэк сам проверяет права на КАЖДУЮ запись: к запросу добавляется пароль
+// администратора (pwd, github.io — хранится в sessionStorage cc_admin_pwd до закрытия вкладки)
+// или пропуск портала (pp, только *.acons.space). Ответ no_auth / bad_pass → режим правки
+// выключается (authLost), человеку предлагается войти заново.
+// Портал открывает шахматку ссылкой ?p=<пропуск>: кладём его в localStorage cc_pass и убираем
+// из адреса. Роль «администратор» = правка без пароля, автор — ФИО из пропуска (бэк ставит сам);
+// «просмотр» — только чтение. На github.io пропуск не читается, всё по паролю, как раньше.
+function isPortalHost(h) { return /(^|\.)acons\.space$/i.test(String(h || '')); }
+// Содержимое пропуска {l: логин, n: ФИО, a: админка, r: роль, exp, iat} — только для страницы;
+// подпись и актуальную роль проверяет бэк.
+function passInfo(p) {
+  try {
+    var s = String(p || '').split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) s += '=';
+    return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(s), function (c) { return c.charCodeAt(0); })));
+  } catch (ex) { return null; }
+}
+function passUsable(info, nowSec) { return !!(info && info.l && info.a === 'ss' && info.exp && info.exp > nowSec); }
+function passIsAdmin(info) { return String((info && info.r) || '').trim().toLowerCase() === 'администратор'; }
+function passNeedsRenew(info, nowSec) { return !(info && info.iat && nowSec - info.iat < 86400); }
+var PORTAL_MODE = isPortalHost(location.hostname);
+var PORTAL_URL = 'https://acons.space';
+var PORTAL_PASS_KEY = 'cc_pass';
+var PORTAL_PASS = '';
+function forgetPortalPass() { PORTAL_PASS = ''; try { localStorage.removeItem(PORTAL_PASS_KEY); } catch (ex) {} }
+(function takePassFromUrl() {
+  if (!PORTAL_MODE) return;
+  try {
+    var q = new URLSearchParams(location.search);
+    var p = q.get('p');
+    if (p) {
+      try { localStorage.setItem(PORTAL_PASS_KEY, p); } catch (ex) {}
+      q.delete('p');
+      var rest = q.toString();
+      history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
+    }
+  } catch (ex) {}
+  try { PORTAL_PASS = localStorage.getItem(PORTAL_PASS_KEY) || ''; } catch (ex) { PORTAL_PASS = ''; }
+  if (PORTAL_PASS && !passUsable(passInfo(PORTAL_PASS), Date.now() / 1000)) forgetPortalPass();
+})();
+var ADMIN_PWD = PORTAL_MODE ? '' : (sessionStorage.getItem('cc_admin_pwd') || '');
+
+// Поля прав для записи: пропуск (портал, администратор) или пароль; пустые не уходят
+function authFields() {
+  if (PORTAL_MODE) return (IS_ADMIN && PORTAL_PASS) ? { pp: PORTAL_PASS } : {};
+  return ADMIN_PWD ? { pwd: ADMIN_PWD } : {};
+}
+function authBody(obj) {
+  var a = authFields();
+  for (var k in a) obj[k] = a[k];
+  return JSON.stringify(obj);
+}
+function authQ() {
+  var a = authFields();
+  return a.pp ? '&pp=' + encodeURIComponent(a.pp) : (a.pwd ? '&pwd=' + encodeURIComponent(a.pwd) : '');
+}
+// fetch для записи: ответ отдаётся вызывающему как есть; если бэк отказал в правах — выключить правку
+function authFetch(url, opts) {
+  return fetch(url, opts).then(function (r) {
+    r.clone().json().then(function (d) {
+      if (d && (d.error === 'no_auth' || d.error === 'bad_pass')) authLost(d.error);
+    }).catch(function () {});
+    return r;
+  });
+}
+function authLost(kind) {
+  var was = IS_ADMIN;
+  IS_ADMIN = false;
+  ADMIN_PWD = '';
+  try { sessionStorage.removeItem('cc_admin'); sessionStorage.removeItem('cc_admin_pwd'); } catch (ex) {}
+  if (kind === 'bad_pass') forgetPortalPass();
+  setAuthBtn(false);
+  applyPortalUI();
+  if (was) toast(PORTAL_MODE
+    ? 'Вход через портал больше не действует — правка выключена. Войдите через портал заново.'
+    : 'Нужно заново войти как администратор — правка выключена.', 'err', 9000);
+}
 
 // Версия списка изменений. Менять при обновлении модалки «Что нового» — тогда
 // окно снова покажется пользователям автоматически (если они не отключили его).
@@ -786,9 +883,17 @@ var _pwdCb = null;
 window.onload = function () {
   ZOOM = parseInt(localStorage.getItem('cc_zoom') || '100', 10);
   applyZoom();
-  if (sessionStorage.getItem('cc_admin') === '1') {
+  // Режим администратора: портал — пропуск с ролью «администратор»; github.io — сохранённый пароль
+  // (старый флаг cc_admin без пароля больше не даёт правку: бэк теперь проверяет пароль сам)
+  if (PORTAL_MODE ? (!!PORTAL_PASS && passIsAdmin(passInfo(PORTAL_PASS))) : !!ADMIN_PWD) {
     IS_ADMIN = true;
     setAuthBtn(true);
+  }
+  applyPortalUI();
+  // *.acons.space: пропуск раз в сутки меняется на свежий; вкладку могут не закрывать — проверка раз в час
+  if (PORTAL_MODE && PORTAL_PASS) {
+    renewPass();
+    setInterval(function () { if (PORTAL_PASS) renewPass(); }, 3600000);
   }
   // Панель чек-листов: клик по элементу — подсветка, по 🗑 — удаление, по 📷 — догрузка фото
   document.getElementById('chk-panel-list').onclick = function (ev) {
@@ -856,7 +961,8 @@ window.onload = function () {
     }
   };
   window.addEventListener('resize', function () { if (CHECK_MODE) positionChkPanel(); });
-  loadData();
+  // *.acons.space без пропуска: сначала спросить портал, открыт ли просмотр без входа
+  checkGuestAccess().then(function (open) { if (open) loadData(); });
 };
 
 // ─── WHAT'S NEW ───────────────────────────────────────────────────────────────
@@ -1713,7 +1819,7 @@ function requestRemoveArchiveWork(box, workId) {
   if (sum.length <= 1) { toast('Нельзя убрать последнюю работу — удалите чек-лист целиком (🗑)', 'err', 6000); return; }
   if (!confirm('Убрать работу «' + label + '» из чек-листа (все её этажи)?')) return;
   setSt('spin', '…');
-  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'removeArchiveWork', id: id, workId: workId, user: getUserName() }) })
+  authFetch(BASE, { method: 'POST', body: authBody({ action: 'removeArchiveWork', id: id, workId: workId, user: getUserName() }) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
@@ -1767,7 +1873,7 @@ function requestDeleteChecklist(id, num) {
   var rec = chkGroupInfo(id);
   var action = (rec && rec.source === 'archive') ? 'deleteArchiveChecklist' : 'deleteChecklist';
   setSt('spin', '…');
-  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: action, id: id, user: getUserName() }) })
+  authFetch(BASE, { method: 'POST', body: authBody({ action: action, id: id, user: getUserName() }) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
@@ -1938,7 +2044,7 @@ function saveEditCells() {
     ? { action: 'editArchiveCells', id: id, cells: cells, user: user }
     : { action: 'editChecklistCells', id: id, cells: cells,
         number: number, date: dateISO, comment: comment, user: user };
-  fetch(BASE, { method: 'POST', body: JSON.stringify(payload) })
+  authFetch(BASE, { method: 'POST', body: authBody(payload) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
@@ -2028,7 +2134,7 @@ function uploadChecklistPhotos(fileList) {
     var reader = new FileReader();
     reader.onload = function () {
       var b64 = String(reader.result).split(',')[1] || '';
-      fetch(BASE, { method: 'POST', body: JSON.stringify({
+      authFetch(BASE, { method: 'POST', body: authBody({
         action: 'addChecklistFile', id: id, user: getUserName(),
         fileName: f.name, mimeType: f.type || 'application/octet-stream', fileData: b64,
       }) })
@@ -2183,7 +2289,7 @@ function changeChecklistStatus(sel) {
   if (!getUserName()) { openName(function () { changeChecklistStatus(sel); }); return; }
   sel.disabled = true;
   setSt('spin', '…');
-  fetch(BASE, { method: 'POST', body: JSON.stringify({ action: 'setChecklistStatus', id: id, status: status, user: getUserName() }) })
+  authFetch(BASE, { method: 'POST', body: authBody({ action: 'setChecklistStatus', id: id, status: status, user: getUserName() }) })
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
@@ -2435,7 +2541,7 @@ function submitUpload() {
       status: status, comment: comment, number: number, date: date, user: user,
       fileName: f.name, mimeType: f.type || 'application/octet-stream', fileData: b64,
     };
-    fetch(BASE, { method: 'POST', body: JSON.stringify(payload) })
+    authFetch(BASE, { method: 'POST', body: authBody(payload) })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
@@ -2485,7 +2591,7 @@ function cellClick(corpus, pod, floorNum, workId) {
   setSt('spin', '…');
 
   var url = BASE + '?action=saveCell&workId=' + encodeURIComponent(workId) + '&floorId=' + encodeURIComponent(floorId) + '&undo=' + isDone;
-  fetch(url)
+  authFetch(url + authQ())
   .then(function (r) { return r.json(); })
   .then(function (d) {
     if (!d.ok) throw new Error(d.error || 'Ошибка сервера');
@@ -2502,6 +2608,11 @@ function cellClick(corpus, pod, floorNum, workId) {
 
 // ─── AUTH ──────────────────────────────────────────────────────────────────────
 function openPwd(cb) {
+  // *.acons.space с пропуском без роли «администратор»: портал вернул бы тот же пропуск — не зовём
+  if (PORTAL_MODE && PORTAL_PASS) {
+    toast('У вашей учётной записи портала в СС роль «просмотр» — правка недоступна', 'inf', 5000);
+    return;
+  }
   _pwdCb = cb || null;
   document.getElementById('pwd-overlay').classList.remove('hide');
   document.getElementById('pwd-inp').value = '';
@@ -2514,6 +2625,7 @@ function closePwd() {
 }
 
 function submitPwd() {
+  if (PORTAL_MODE) return; // на *.acons.space пароль не спрашиваем — только вход через портал
   var pwd = document.getElementById('pwd-inp').value.trim();
   if (!pwd) return;
   fetch(BASE + '?action=checkPassword&pwd=' + encodeURIComponent(pwd))
@@ -2522,6 +2634,8 @@ function submitPwd() {
       if (d.ok) {
         IS_ADMIN = true;
         sessionStorage.setItem('cc_admin', '1');
+        ADMIN_PWD = pwd;
+        sessionStorage.setItem('cc_admin_pwd', pwd);
         setAuthBtn(true);
         closePwd();
         toast('Вход выполнен', 'ok');
@@ -2538,6 +2652,12 @@ function submitPwd() {
 var _nameCb = null;
 
 function getUserName() {
+  // Вход через портал администратором: имя — ФИО из пропуска (бэк всё равно подставит его сам)
+  if (PORTAL_MODE && IS_ADMIN && PORTAL_PASS) {
+    var info = passInfo(PORTAL_PASS) || {};
+    var fio = String(info.n || info.l || '').trim();
+    if (fio) return fio;
+  }
   return (localStorage.getItem('cc_user') || '').trim();
 }
 
@@ -2576,7 +2696,69 @@ function setAuthBtn(admin) {
     btn.textContent = '✓ Администратор';
     btn.className   = 'btn btn-ok';
     btn.onclick     = null;
+  } else {
+    btn.textContent = '🔐 Войти';
+    btn.className   = 'btn btn-pri';
+    btn.onclick     = function () { openPwd(null); };
   }
+}
+
+// ─── ПОРТАЛ acons.space: интерфейс (только PORTAL_MODE) ───────────
+// «← Портал» и «Выйти» — только при пропуске; окно входа — «Войти через портал» без поля пароля.
+function applyPortalUI() {
+  if (!PORTAL_MODE) return;
+  var has = !!PORTAL_PASS;
+  document.getElementById('portal-back').style.display = has ? '' : 'none';
+  document.getElementById('portal-logout').style.display = has ? '' : 'none';
+  document.getElementById('pwd-sub').style.display = '';
+  document.getElementById('pwd-inp').style.display = 'none';
+  document.getElementById('pwd-ok').style.display = 'none';
+  document.getElementById('pwd-portal').style.display = '';
+}
+// Решение 2026-09-14 (как в Отделке/КЛАД/СБ3/СБ5): пропуск живёт 30 дней и раз в сутки меняется
+// на свежий. Не вышло по сети — не страшно, попробуем через час; снятую роль бэк увидит сам.
+function renewPass() {
+  if (!PORTAL_MODE || !PORTAL_PASS) return;
+  var info = passInfo(PORTAL_PASS);
+  if (!passNeedsRenew(info, Date.now() / 1000)) return;
+  fetch(BASE + '?action=portalRenew&pp=' + encodeURIComponent(PORTAL_PASS) + '&t=' + Date.now())
+    .then(function (r) { return r.text(); })
+    .then(function (t) {
+      var j = JSON.parse(t);
+      if (j && j.error === 'bad_pass') { authLost('bad_pass'); return; }
+      var ni = (j && j.ok && j.p) ? passInfo(j.p) : null;
+      if (!ni || String(ni.l || '').toLowerCase() !== String((info && info.l) || '').toLowerCase()) return;
+      PORTAL_PASS = j.p;
+      try { localStorage.setItem(PORTAL_PASS_KEY, j.p); } catch (ex) {}
+      var adm = passIsAdmin(ni);
+      if (adm !== IS_ADMIN) { IS_ADMIN = adm; setAuthBtn(adm); if (WORKS.length) render(); }
+      applyPortalUI();
+    })
+    .catch(function () { /* следующая попытка через час */ });
+}
+function portalLogout() {
+  forgetPortalPass();
+  location.href = PORTAL_URL;
+}
+// ─── ГОСТЯМ БЕЗ ВХОДА (переключатель владельца на портале, вкладка «Инструменты») ───
+// Только *.acons.space и только у гостя без пропуска. Закрываем ТОЛЬКО по явному ответу
+// {ok:true, data:{guest:''}}; сервер не ответил или ответил не тем — показываем как раньше
+// (решение 2026-09-16: сбой связи не должен запирать людей). На github.io не участвует.
+var GUEST_API = '/api/portal/guest?app=ss';
+function checkGuestAccess() {
+  if (!PORTAL_MODE || PORTAL_PASS) return Promise.resolve(true);
+  var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  var tm = ctl ? setTimeout(function () { ctl.abort(); }, 5000) : 0;
+  return fetch(GUEST_API + '&t=' + Date.now(), ctl ? { signal: ctl.signal } : undefined)
+    .then(function (r) { return r.ok ? r.text() : ''; })
+    .then(function (t) {
+      if (tm) clearTimeout(tm);
+      var j = null; try { j = JSON.parse(t); } catch (ex) {}
+      var closed = !!(j && j.ok === true && j.data && j.data.guest === '');
+      if (closed) { document.getElementById('guest-closed').classList.remove('hide'); hideLoader(); }
+      return !closed;
+    })
+    .catch(function () { return true; });
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────

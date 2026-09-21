@@ -12,7 +12,8 @@ const CHK_INT_SHEET   = 'Чек листы_внутренние';
 const CHK_ARC_SHEET   = 'Архив';
 const CHK_FOLDER_NAME = 'Чек листы СС';
 const INCLUDE_EXTERNAL = false; // внешние чек-листы (лист «Чек листы» + иерархия) отключены; true — вернуть
-const ADMIN_PASSWORD  = 'adminCC';
+// Пароль администратора — в Script Properties `ADMIN_PASSWORD` (с 2026-09-21; раньше лежал в коде
+// публичного репозитория и был сменён). Не задан — вход по паролю выключен, остаётся портал.
 
 // Справочник работ — столбцы (0-индекс для массива)
 // A(0)=ID_работы  B(1)=Раздел  C(2)=Система  D(3)=Работа  E(4)=Локация
@@ -51,10 +52,32 @@ function doGet(e) {
     if (action === 'getData')       return jsonOut(getData());
     if (action === 'getChecklists') return jsonOut(getChecklists());
     if (action === 'ping')          return ContentService.createTextOutput('OK').setMimeType(ContentService.MimeType.TEXT);
-    if (action === 'checkPassword') return jsonOut({ ok: p.pwd === ADMIN_PASSWORD });
+    if (action === 'checkPassword') {
+      // Пропуск портала (2026-09-21): роль «администратор» = вход администратора
+      if (p.pp) {
+        var whoC = portalWho_(p.pp);
+        if (!whoC) return jsonOut({ ok: false, error: 'bad_pass' });
+        if (whoC.role === PORTAL_ADMIN_ROLE) return jsonOut({ ok: true, role: 'admin', fio: whoC.fio });
+        return jsonOut({ ok: false, role: whoC.role });
+      }
+      return jsonOut({ ok: pwdOk_(p.pwd) });
+    }
+    // Свежий пропуск портала на 30 дней (страница на ss.acons.space просит раз в сутки)
+    if (action === 'portalRenew') {
+      if (!p.pp) return jsonOut({ ok: false, error: 'not_portal' });
+      var whoR = portalWho_(p.pp);
+      if (!whoR) return jsonOut({ ok: false, error: 'bad_pass' });
+      return jsonOut(portalRenew_(whoR));
+    }
     if (action === 'clearCache')    { clearCache(); return jsonOut({ ok: true }); }
-    if (action === 'migrateInt')    return jsonOut(migrateInternalSheet());
+    if (action === 'migrateInt') {
+      var authM = writeAuth_(p.pwd, p.pp);
+      if (!authM.ok) return jsonOut(authM);
+      return jsonOut(migrateInternalSheet());
+    }
     if (action === 'saveCell') {
+      var authS = writeAuth_(p.pwd, p.pp);
+      if (!authS.ok) return jsonOut(authS);
       saveCellFact(p.workId, p.floorId, p.undo === 'true');
       return jsonOut({ ok: true });
     }
@@ -71,6 +94,12 @@ function doGet(e) {
 function doPost(e) {
   try {
     var body = JSON.parse(e.postData.contents);
+    // С 2026-09-21 каждая запись — только администратору: пароль (pwd) или пропуск портала (pp).
+    // До этого права проверяла лишь страница, а бэк выполнял запись для любого, кто знал адрес.
+    // Вход через портал: автор (user) — ФИО учётки, имя с клиента не используется.
+    var auth = writeAuth_(body.pwd, body.pp);
+    if (!auth.ok) return jsonOut(auth);
+    if (auth.fio) body.user = auth.fio;
     if (body.action === 'saveCell') {
       saveCellFact(body.workId, body.floorId, !!body.undo);
       return jsonOut({ ok: true });
@@ -517,7 +546,7 @@ function editArchiveCells(body) {
 // Пакетная загрузка строк в лист «Архив» (разовый перенос из выгрузки acons-app).
 // body: { pwd, rows: [[A..P] × N] } — pwd обязателен; строки только дописываются.
 function importArchiveRows(body) {
-  if (String(body.pwd) !== ADMIN_PASSWORD) throw new Error('Нет доступа');
+  // Права проверены в doPost (writeAuth_: пароль или пропуск администратора)
   var rows = body.rows || [];
   if (!rows.length) throw new Error('Нет строк');
 
@@ -988,3 +1017,135 @@ function formatDateOut(v) {
 }
 
 function pad(n) { return n < 10 ? '0' + n : String(n); }
+
+// ───────────── Права на запись (2026-09-21) ─────────────
+function adminPassword_() {
+  return String(PropertiesService.getScriptProperties().getProperty('ADMIN_PASSWORD') || '');
+}
+function pwdOk_(pwd) {
+  var a = adminPassword_();
+  return !!a && String(pwd || '') === a;
+}
+/**
+ * Право на запись: годный пропуск портала с ролью «администратор» или пароль администратора.
+ * {ok:true, fio} (fio — только у пропуска) или {ok:false, error}: 'bad_pass' — пропуск не принят
+ * (страница выключает режим правки и зовёт на портал), 'no_auth' — пароля нет или он неверный.
+ */
+function writeAuth_(pwd, pp) {
+  if (pp) {
+    var who = portalWho_(pp);
+    if (!who || who.role !== PORTAL_ADMIN_ROLE) return { ok: false, error: 'bad_pass' };
+    return { ok: true, fio: who.fio || who.login };
+  }
+  if (pwdOk_(pwd)) return { ok: true, fio: '' };
+  return { ok: false, error: 'no_auth' };
+}
+
+// ───────────── Вход через портал acons.space (2026-09-21, Портал_acons/TZ.md §9 шаг 7) ─────────────
+// Страница на ss.acons.space получает от портала подписанный пропуск ?p= и шлёт его в бэк
+// параметром/полем `pp`. Копия схемы СБ3/СБ5:
+//   1. checkPortalPass_ — подпись HMAC-SHA256 общим секретом PORTAL_SECRET, код админки 'ss', срок, роль;
+//   2. portalLive_ — живая сверка с сервером портала (роль могли снять), кэш 5 минут;
+//      сервер не ответил → доверяем пропуску (сбой портала не должен выбрасывать людей).
+// Роли: «администратор» — правка, «просмотр» — только чтение (как без входа).
+// Кэш plive_<логин> — служебный (права, 5 мин), в clearCache() НЕ добавляется.
+// Script Property PORTAL_SECRET (тот же, что у портала) задаёт владелец вручную.
+var PORTAL_APP = 'ss';
+var PORTAL_ADMIN_ROLE = 'администратор';
+var PORTAL_ROLES = ['администратор', 'просмотр'];
+var PORTAL_PASS_TTL_SEC = 30 * 86400;
+var PORTAL_RECHECK_SEC = 300;
+var PORTAL_CHECK_URL = 'https://acons.space/api/portal/check';
+
+/** Пропуск подлинный и роль на портале не снята → {login, fio, role}; иначе null. */
+function portalWho_(pp) {
+  var pass = checkPortalPass_(pp, PORTAL_APP, PORTAL_ROLES);
+  if (!pass) return null;
+  var login = String(pass.login || '').trim().toLowerCase();
+  if (!login) return null;
+  var live = portalLive_(login);
+  if (live && !live.role) return null;   // отключён, срок вышел или роль в СС снята
+  var role = String((live && live.role) || pass.role || '').trim().toLowerCase();
+  if (PORTAL_ROLES.indexOf(role) < 0) return null;
+  return { login: login, fio: String((live && live.fio) || pass.fio || '').trim(), role: role };
+}
+
+/**
+ * Текущая роль человека в СС по данным сервера портала acons.space, кэш 5 минут.
+ * {role, fio}: role '' — доступа нет; null — сервер не ответил (пускаем по пропуску).
+ * Запрос подписан PORTAL_SECRET: sig = hex(HMAC-SHA256('логин|ss|ts')), ts — unix-секунды.
+ */
+function portalLive_(login) {
+  login = String(login || '').trim().toLowerCase();
+  var cache = CacheService.getScriptCache();
+  var key = 'plive_' + Utilities.base64EncodeWebSafe(login);
+  var c = cache.get(key);
+  if (c) return c === 'err' ? null : JSON.parse(c);
+  try {
+    var ts = String(Math.floor(Date.now() / 1000));
+    var sig = Utilities.computeHmacSha256Signature(login + '|' + PORTAL_APP + '|' + ts, secret_())
+      .map(function (b) { return ('0' + (b & 255).toString(16)).slice(-2); }).join('');
+    var url = PORTAL_CHECK_URL + '?login=' + encodeURIComponent(login) + '&app=' + PORTAL_APP +
+              '&ts=' + ts + '&sig=' + sig;
+    var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
+    if (resp.getResponseCode() !== 200) throw new Error('сервер портала: HTTP ' + resp.getResponseCode());
+    var j = JSON.parse(resp.getContentText());
+    if (!j.ok) throw new Error('сервер портала: ' + j.error);
+    var role = String(j.role || '').trim().toLowerCase();
+    var res = { role: PORTAL_ROLES.indexOf(role) >= 0 ? role : '', fio: String(j.fio || '') };
+    cache.put(key, JSON.stringify(res), PORTAL_RECHECK_SEC);
+    return res;
+  } catch (e) {
+    cache.put(key, 'err', 60);   // не долбим сервер при сбое, через минуту попробуем снова
+    return null;
+  }
+}
+
+/**
+ * ЗАПУСТИТЬ ОДИН РАЗ В РЕДАКТОРЕ (владелец) перед выкладкой: Google спросит разрешение
+ * «подключаться к внешним сервисам» — нажать «Разрешить». В журнале: ответ портала с "ok": true
+ * и что оба свойства (PORTAL_SECRET, ADMIN_PASSWORD) заданы.
+ */
+function authorizeServer() {
+  var r = UrlFetchApp.fetch('https://acons.space/api/portal?action=ping', { muteHttpExceptions: true });
+  Logger.log('Сервер портала ответил: HTTP ' + r.getResponseCode() + ' ' + r.getContentText().slice(0, 120));
+  var pr = PropertiesService.getScriptProperties();
+  Logger.log('PORTAL_SECRET ' + (pr.getProperty('PORTAL_SECRET') ? 'задан' : 'НЕ ЗАДАН'));
+  Logger.log('ADMIN_PASSWORD ' + (pr.getProperty('ADMIN_PASSWORD') ? 'задан' : 'НЕ ЗАДАН'));
+}
+
+/** Свежий пропуск на 30 дней с текущими ролью и ФИО — страница просит раз в сутки. */
+function portalRenew_(who) {
+  var now = Math.floor(Date.now() / 1000);
+  var payload = JSON.stringify({ l: who.login, n: who.fio, a: PORTAL_APP, r: who.role,
+                                 exp: now + PORTAL_PASS_TTL_SEC, iat: now });
+  var p = b64url_(Utilities.newBlob(payload).getBytes()) + '.' +
+          b64url_(Utilities.computeHmacSha256Signature(payload, secret_()));
+  return { ok: true, p: p, role: who.role, fio: who.fio };
+}
+
+/** Проверка пропуска — копия эталона из Портал_acons/Code.gs. {login, fio, role} или null. */
+function checkPortalPass_(p, myCode, allowedRoles) {
+  try {
+    var parts = String(p || '').split('.');
+    if (parts.length !== 2) return null;
+    var b64 = parts[0];
+    while (b64.length % 4) b64 += '=';
+    var payload = Utilities.newBlob(Utilities.base64DecodeWebSafe(b64)).getDataAsString();
+    // Подпись «как у Google»: computeHmacSha256Signature(строка, строка) — сервер портала считает так же
+    var sig = b64url_(Utilities.computeHmacSha256Signature(payload, secret_()));
+    if (sig !== parts[1]) return null;
+    var d = JSON.parse(payload);
+    if (d.a !== myCode || !d.exp || d.exp < Math.floor(Date.now() / 1000)) return null;
+    if (allowedRoles && allowedRoles.indexOf(String(d.r || '').trim().toLowerCase()) < 0) return null;
+    return { login: d.l, fio: d.n, role: d.r };
+  } catch (e) { return null; }
+}
+
+function secret_() {
+  var s = PropertiesService.getScriptProperties().getProperty('PORTAL_SECRET');
+  if (!s) throw new Error('PORTAL_SECRET не задан в свойствах скрипта');
+  return s;
+}
+
+function b64url_(bytes) { return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/, ''); }
